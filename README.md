@@ -105,6 +105,12 @@ data/location/LocationProvider.kt   fused location (ported from OVERWATCH)
 ui/ + MainActivity.kt       Compose UI (Catppuccin Mocha)
 ```
 
+## Paper
+
+A full technical write-up — the per-ecosystem detection methodology (how VIGIL
+tracks each tracker type) and the harder modeling engine for what AirGuard and the
+built-in detectors miss — is in **[paper/vigil.md](paper/vigil.md)**.
+
 ## Build
 
 Standard Android/Gradle. A committed debug keystore signs CI and local builds
