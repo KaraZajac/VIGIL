@@ -28,7 +28,7 @@ that idea.
 
 ---
 
-## Privacy first — like OVERWATCH
+## Privacy first — fully offline
 
 VIGIL requests **no `INTERNET` permission at all.** There is no server, no account,
 no telemetry. Every tracker, every sighting, and the entire learned baseline live
