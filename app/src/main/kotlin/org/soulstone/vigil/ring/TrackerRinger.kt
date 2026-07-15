@@ -148,7 +148,8 @@ object TrackerRinger {
                         done("Ringing… listen for the AirTag.", g)
                     } else {
                         done(
-                            if (status == BluetoothGatt.GATT_SUCCESS) "Ringing… listen for the tracker."
+                            if (status == BluetoothGatt.GATT_SUCCESS)
+                                "Ring command sent. A tag only chirps when it's separated from its owner — your own tag that's with you won't."
                             else "The tracker refused the ring command.", g
                         )
                     }
