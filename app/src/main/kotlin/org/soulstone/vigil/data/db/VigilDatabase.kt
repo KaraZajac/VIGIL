@@ -32,7 +32,12 @@ data class TrackerEntity(
     val lastAlertMs: Long = 0,
     // baseline accounting: distinct calendar-days this tracker was seen at an anchor place
     val lastAnchorDay: Long = -1,
-    val anchorDayCount: Int = 0
+    val anchorDayCount: Int = 0,
+    // display / grounding: latest + peak RSSI and the current co-movement evidence
+    val lastRssi: Int = 0,
+    val peakRssi: Int = -127,
+    val distinctPlaces: Int = 0,
+    val effectiveSightings: Int = 0
 )
 
 /** One sighting of a tracker at one instant, geotagged when a fix is available. */
@@ -74,6 +79,11 @@ interface TrackerDao {
 
     @Query("UPDATE trackers SET approved = :approved WHERE stableId = :id")
     suspend fun setApproved(id: String, approved: Boolean)
+
+    // Rotated identities pile up (MAC rotation mints a new row each rotation); drop
+    // stale, non-approved rows so the table and the UI list don't grow without bound.
+    @Query("DELETE FROM trackers WHERE lastSeen < :cutoff AND approved = 0")
+    suspend fun pruneStale(cutoff: Long)
 }
 
 @Dao
@@ -99,7 +109,7 @@ interface PlaceDao {
 
 @Database(
     entities = [TrackerEntity::class, SightingEntity::class, PlaceEntity::class],
-    version = 1,
+    version = 2,
     exportSchema = false
 )
 abstract class VigilDatabase : RoomDatabase() {

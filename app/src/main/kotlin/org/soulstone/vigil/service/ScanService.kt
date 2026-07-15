@@ -12,6 +12,7 @@ import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
 import android.util.Log
+import java.util.concurrent.ConcurrentHashMap
 import androidx.core.app.NotificationCompat
 import androidx.lifecycle.LifecycleService
 import androidx.lifecycle.lifecycleScope
@@ -49,6 +50,7 @@ class ScanService : LifecycleService() {
         private const val NOTIFICATION_ID = 0x5161  // "VIGIL"
         private const val PRUNE_INTERVAL_MS = 6 * 3_600_000L
         private const val CLONE_COOLDOWN_MS = 2 * 3_600_000L
+        private const val MIN_RECORD_INTERVAL_MS = 15_000L  // per-device DB throttle
 
         const val ACTION_START = "org.soulstone.vigil.action.START"
         const val ACTION_STOP = "org.soulstone.vigil.action.STOP"
@@ -75,7 +77,8 @@ class ScanService : LifecycleService() {
     private lateinit var location: LocationProvider
     private lateinit var scanner: BleTrackerScanner
     private val presence = PresenceEngine()
-    private var lastCloneAlertMs = 0L
+    private val lastRecordedAt = ConcurrentHashMap<String, Long>()
+    @Volatile private var lastCloneAlertMs = 0L
     private var pruneJob: Job? = null
 
     override fun onCreate() {
@@ -131,7 +134,16 @@ class ScanService : LifecycleService() {
             }
         }
 
-        // Temporal co-movement (identity path) — persisted + evaluated off-thread.
+        // Temporal co-movement (identity path). CALLBACK_TYPE_ALL_MATCHES fires on
+        // every advert (many/sec), so throttle the persisted path per device: the
+        // presence engine above still sees every advert, but the DB records at most
+        // one sighting per device per MIN_RECORD_INTERVAL_MS. Keeps the count
+        // meaningful and avoids hammering the database.
+        val last = lastRecordedAt[obs.stableId]
+        if (last != null && obs.timestampMs - last < MIN_RECORD_INTERVAL_MS) return
+        lastRecordedAt[obs.stableId] = obs.timestampMs
+        if (lastRecordedAt.size > 4096) lastRecordedAt.clear()  // guard vs MAC-rotation growth
+
         lifecycleScope.launch {
             val result = runCatching {
                 repo.record(obs, fix?.latitude, fix?.longitude, settings.sensitivity.value)
@@ -145,6 +157,7 @@ class ScanService : LifecycleService() {
         _running.value = false
         scanner.stop()
         location.stop()
+        lastRecordedAt.clear()
         pruneJob?.cancel(); pruneJob = null
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
             stopForeground(STOP_FOREGROUND_REMOVE)

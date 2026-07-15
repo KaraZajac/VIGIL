@@ -18,23 +18,29 @@ import org.soulstone.vigil.data.db.PlaceEntity
 object BaselineManager {
 
     const val DAY_MS = 86_400_000L
-    const val ANCHOR_MIN_VISITS = 60
+    const val DWELL_BUCKET_MS = 10 * 60_000L   // count at most one "visit" per 10-min dwell window
+    const val ANCHOR_MIN_VISITS = 18           // ~3h cumulative dwell before a cell counts as home/work
     const val BASELINE_MIN_DAYS = 3
 
-    /** Record a location fix in its cell; returns whether that cell is now an anchor. */
+    /**
+     * Note presence in a cell; returns whether it's an anchor. Crucially a cell
+     * accrues at most ONE visit per [DWELL_BUCKET_MS], so the anchor signal tracks
+     * time actually spent there — not how many trackers or adverts were seen.
+     *
+     * The previous per-sighting count was a real safety flaw: a busy street or a
+     * single chatty tracker could mint a fake "home" in seconds, which would then
+     * baseline-trust (silence alerts for) any tracker seen there — including a real
+     * stalking device.
+     */
     suspend fun noteLocation(placeDao: PlaceDao, geohash6: String, now: Long): Boolean {
-        val existing = placeDao.get(geohash6)
-        val visits = (existing?.visitCount ?: 0) + 1
+        val existing = placeDao.get(geohash6) ?: run {
+            placeDao.upsert(PlaceEntity(geohash6 = geohash6, visitCount = 1, lastSeen = now, anchor = false))
+            return false
+        }
+        if (now - existing.lastSeen < DWELL_BUCKET_MS) return existing.anchor
+        val visits = existing.visitCount + 1
         val anchor = visits >= ANCHOR_MIN_VISITS
-        placeDao.upsert(
-            PlaceEntity(
-                geohash6 = geohash6,
-                label = existing?.label ?: "",
-                visitCount = visits,
-                lastSeen = now,
-                anchor = anchor
-            )
-        )
+        placeDao.upsert(existing.copy(visitCount = visits, lastSeen = now, anchor = anchor))
         return anchor
     }
 }

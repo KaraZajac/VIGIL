@@ -1,6 +1,8 @@
 package org.soulstone.vigil.data
 
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import org.soulstone.vigil.data.db.SightingEntity
 import org.soulstone.vigil.data.db.TrackerEntity
 import org.soulstone.vigil.data.db.VigilDatabase
@@ -18,6 +20,10 @@ import org.soulstone.vigil.util.Geohash
  */
 class TrackerRepository(private val db: VigilDatabase) {
 
+    // Serialises record() so the read-modify-write of a tracker row is atomic —
+    // concurrent observations were racing and losing count / first-seen updates.
+    private val mutex = Mutex()
+
     data class RecordResult(val tracker: TrackerEntity, val newlyAlerting: Boolean)
 
     fun observeTrackers(): Flow<List<TrackerEntity>> = db.trackerDao().observeAll()
@@ -26,7 +32,9 @@ class TrackerRepository(private val db: VigilDatabase) {
         db.trackerDao().setApproved(id, approved)
 
     suspend fun prune(retentionDays: Int = RETENTION_DAYS) {
-        db.sightingDao().prune(System.currentTimeMillis() - retentionDays * BaselineManager.DAY_MS)
+        val cutoff = System.currentTimeMillis() - retentionDays * BaselineManager.DAY_MS
+        db.sightingDao().prune(cutoff)
+        db.trackerDao().pruneStale(cutoff)
     }
 
     /**
@@ -38,7 +46,7 @@ class TrackerRepository(private val db: VigilDatabase) {
         lat: Double?,
         lon: Double?,
         sensitivity: Sensitivity
-    ): RecordResult {
+    ): RecordResult = mutex.withLock {
         val now = obs.timestampMs
         val geohash7 = if (lat != null && lon != null) Geohash.encode(lat, lon, 7) else null
         val geohash6 = if (lat != null && lon != null) Geohash.encode(lat, lon, 6) else null
@@ -73,16 +81,13 @@ class TrackerRepository(private val db: VigilDatabase) {
 
         val approved = existing?.approved ?: false
 
-        // --- co-movement evaluation (skipped for trusted tags) ---------------
-        val riskState: RiskState
-        if (approved || baselineSafe) {
-            riskState = RiskState.OBSERVED
-        } else {
-            val since = now - CoMovementEvaluator.WINDOW_MS
-            val recent = db.sightingDao().recentFor(obs.stableId, since)
-            val t = CoMovementEvaluator.thresholdsFor(sensitivity)
-            riskState = CoMovementEvaluator.evaluate(recent, obs.ecosystem, t).riskState
-        }
+        // Always compute the co-movement assessment so the UI can show grounded
+        // evidence; only *escalation* is suppressed for trusted (approved/baseline) tags.
+        val since = now - CoMovementEvaluator.WINDOW_MS
+        val recent = db.sightingDao().recentFor(obs.stableId, since)
+        val t = CoMovementEvaluator.thresholdsFor(sensitivity)
+        val assessment = CoMovementEvaluator.evaluate(recent, obs.ecosystem, t)
+        val riskState = if (approved || baselineSafe) RiskState.OBSERVED else assessment.riskState
 
         val wasAlerting = existing?.riskState == RiskState.ALERTING.name
         val cooldownOk = now - (existing?.lastAlertMs ?: 0) > CoMovementEvaluator.ALERT_COOLDOWN_MS
@@ -100,10 +105,14 @@ class TrackerRepository(private val db: VigilDatabase) {
             baselineSafe = baselineSafe,
             lastAlertMs = if (newlyAlerting) now else (existing?.lastAlertMs ?: 0),
             lastAnchorDay = lastAnchorDay,
-            anchorDayCount = anchorDayCount
+            anchorDayCount = anchorDayCount,
+            lastRssi = obs.rssi,
+            peakRssi = maxOf(existing?.peakRssi ?: -127, obs.rssi),
+            distinctPlaces = assessment.distinctPlaces,
+            effectiveSightings = assessment.sightings
         )
         db.trackerDao().upsert(updated)
-        return RecordResult(updated, newlyAlerting)
+        RecordResult(updated, newlyAlerting)
     }
 
     companion object {

@@ -45,8 +45,16 @@ class BleTrackerScanner(
         .build()
 
     private val filters: List<ScanFilter> = buildList {
-        // Apple Find My — match presence of Apple manufacturer data.
-        add(ScanFilter.Builder().setManufacturerData(TrackerSignatures.APPLE_COMPANY_ID, ByteArray(0)).build())
+        // Apple Find My — match ONLY the offline-finding message type (0x12), not
+        // every Apple device (iPhones/Watches/AirPods all advertise company 0x004C).
+        // Data+mask apply from the first manufacturer-data byte, which is the type.
+        add(
+            ScanFilter.Builder().setManufacturerData(
+                TrackerSignatures.APPLE_COMPANY_ID,
+                byteArrayOf(TrackerSignatures.APPLE_TYPE_FINDMY.toByte()),
+                byteArrayOf(0xFF.toByte())
+            ).build()
+        )
         // FMDN / Samsung / Tile / DULT — match their service UUIDs.
         for (uuid in TrackerSignatures.trackerServiceUuids) {
             add(ScanFilter.Builder().setServiceUuid(uuid).build())

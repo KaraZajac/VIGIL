@@ -76,7 +76,10 @@ fun MainScreen(
 ) {
     var detail by remember { mutableStateOf<TrackerEntity?>(null) }
 
-    val active = trackers.filter { !isTrusted(it) }.sortedByDescending { riskRank(it) }
+    val now = System.currentTimeMillis()
+    val active = trackers
+        .filter { !isTrusted(it) && now - it.lastSeen < ACTIVE_WINDOW_MS }
+        .sortedByDescending { riskRank(it) }
     val trusted = trackers.filter { isTrusted(it) }
     val alerting = active.count { statusOf(it) == TrackerStatus.ALERTING }
     val suspicious = active.count { statusOf(it) == TrackerStatus.SUSPICIOUS }
@@ -302,7 +305,7 @@ private fun TrackerCard(t: TrackerEntity, onClick: () -> Unit, onApprove: (Strin
             Column(Modifier.weight(1f)) {
                 Text(ecosystemDisplay(t.ecosystem), fontWeight = FontWeight.SemiBold)
                 Text(
-                    "${statusLabel(status)} · ${t.sightingCount} sightings · ${relative(t.lastSeen)}",
+                    "${statusLabel(status)} · ${t.distinctPlaces} places · ${t.lastRssi} dBm · ${relative(t.lastSeen)}",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -333,11 +336,14 @@ private fun TrackerDetail(t: TrackerEntity, onApprove: (String, Boolean) -> Unit
         Text(statusLabel(status), color = statusColor(status), fontWeight = FontWeight.SemiBold)
         Spacer(Modifier.height(16.dp))
 
-        DetailRow("Sightings", t.sightingCount.toString())
+        DetailRow("Signal (last / peak)", "${t.lastRssi} / ${t.peakRssi} dBm")
+        DetailRow("Distinct places", t.distinctPlaces.toString())
+        DetailRow("Co-movement sightings", t.effectiveSightings.toString())
+        DetailRow("Adverts logged", t.sightingCount.toString())
         DetailRow("First seen", relative(t.firstSeen))
         DetailRow("Last seen", relative(t.lastSeen))
         if (t.anchorDayCount > 0) {
-            DetailRow("Days seen at your places", "${t.anchorDayCount} (trusted at 3)")
+            DetailRow("Days at your places", "${t.anchorDayCount} / 3 to trust")
         }
         DetailRow("Identity", t.stableId.take(22) + "…")
 
@@ -370,6 +376,8 @@ private fun DetailRow(label: String, value: String) {
 }
 
 // ---- pure helpers ----------------------------------------------------------
+
+private const val ACTIVE_WINDOW_MS = 10 * 60_000L  // trackers not seen this recently drop off "Active"
 
 private fun isTrusted(t: TrackerEntity) = t.approved || t.baselineSafe
 
