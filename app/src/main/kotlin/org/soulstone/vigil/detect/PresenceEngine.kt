@@ -137,8 +137,11 @@ class PresenceEngine {
         score += (cells.size.toDouble() / (2.0 * K_CELLS)).coerceIn(0.0, 1.0) * 20
         score += (if (coherent) 1.0 else 0.4) * 20
         val s = score.roundToInt()
+        // Coherence GATES the top tier: a crowd of many radios at many distances is
+        // incoherent (high RSSI variance), so it can reach PROBABLE at most, never
+        // CONFIRMED — this stops packed-transit false clone alarms.
         val tier = when {
-            s >= 85 -> Tier.CONFIRMED
+            s >= 85 && coherent -> Tier.CONFIRMED
             s >= 70 -> Tier.PROBABLE
             s >= 40 -> Tier.WATCHING
             else -> Tier.CLEAR

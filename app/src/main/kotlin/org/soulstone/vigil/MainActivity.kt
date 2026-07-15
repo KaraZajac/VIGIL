@@ -49,8 +49,10 @@ class MainActivity : ComponentActivity() {
 
     private val permissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
-    ) { result ->
-        val granted = result.all { it.value }
+    ) { _ ->
+        // Scanning needs BLE + location; POST_NOTIFICATIONS is optional and must not
+        // block protection if the user declines it.
+        val granted = hasEssentialPermissions()
         permissionsGranted.value = granted
         if (granted) ScanService.start(this)
     }
@@ -59,7 +61,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         settings = Settings.get(this)
         repo = TrackerRepository(VigilDatabase.get(this))
-        permissionsGranted.value = hasAllPermissions()
+        permissionsGranted.value = hasEssentialPermissions()
 
         setContent {
             VigilTheme {
@@ -86,6 +88,9 @@ class MainActivity : ComponentActivity() {
                     onSetSensitivity = { settings.setSensitivity(it) },
                     onApprove = { id, approved ->
                         lifecycleScope.launch { repo.setApproved(id, approved) }
+                    },
+                    onDistrust = { id ->
+                        lifecycleScope.launch { repo.clearBaseline(id) }
                     }
                 )
             }
@@ -94,12 +99,12 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
-        permissionsGranted.value = hasAllPermissions()
+        permissionsGranted.value = hasEssentialPermissions()
     }
 
-    private fun hasAllPermissions(): Boolean = requiredPermissions.all {
-        ContextCompat.checkSelfPermission(this, it) == PackageManager.PERMISSION_GRANTED
-    }
+    private fun hasEssentialPermissions(): Boolean = requiredPermissions
+        .filter { it != Manifest.permission.POST_NOTIFICATIONS }
+        .all { ContextCompat.checkSelfPermission(this, it) == PackageManager.PERMISSION_GRANTED }
 
     @Suppress("unused")
     private fun openAppSettings() {

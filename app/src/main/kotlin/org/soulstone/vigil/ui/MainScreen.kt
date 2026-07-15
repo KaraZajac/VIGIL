@@ -72,7 +72,8 @@ fun MainScreen(
     permissionMessage: String?,
     onStartStop: () -> Unit,
     onSetSensitivity: (Sensitivity) -> Unit,
-    onApprove: (String, Boolean) -> Unit
+    onApprove: (String, Boolean) -> Unit,
+    onDistrust: (String) -> Unit
 ) {
     var detail by remember { mutableStateOf<TrackerEntity?>(null) }
 
@@ -162,14 +163,14 @@ fun MainScreen(
                 }
             } else {
                 items(active, key = { it.stableId }) { t ->
-                    TrackerCard(t, onClick = { detail = t }, onApprove = onApprove)
+                    TrackerCard(t, onClick = { detail = t }, onApprove = onApprove, onDistrust = onDistrust)
                 }
             }
 
             if (trusted.isNotEmpty()) {
                 item { SectionHeader("Trusted (${trusted.size})") }
                 items(trusted, key = { it.stableId }) { t ->
-                    TrackerCard(t, onClick = { detail = t }, onApprove = onApprove)
+                    TrackerCard(t, onClick = { detail = t }, onApprove = onApprove, onDistrust = onDistrust)
                 }
             }
 
@@ -191,7 +192,11 @@ fun MainScreen(
             sheetState = sheetState,
             containerColor = MaterialTheme.colorScheme.surface
         ) {
-            TrackerDetail(t, onApprove = { id, a -> onApprove(id, a); detail = null })
+            TrackerDetail(
+                t,
+                onApprove = { id, a -> onApprove(id, a); detail = null },
+                onDistrust = { id -> onDistrust(id); detail = null }
+            )
         }
     }
 }
@@ -286,7 +291,12 @@ private fun SectionHeader(text: String) {
 }
 
 @Composable
-private fun TrackerCard(t: TrackerEntity, onClick: () -> Unit, onApprove: (String, Boolean) -> Unit) {
+private fun TrackerCard(
+    t: TrackerEntity,
+    onClick: () -> Unit,
+    onApprove: (String, Boolean) -> Unit,
+    onDistrust: (String) -> Unit
+) {
     val status = statusOf(t)
     val accent = statusColor(status)
     Card(
@@ -313,10 +323,8 @@ private fun TrackerCard(t: TrackerEntity, onClick: () -> Unit, onApprove: (Strin
             when (status) {
                 TrackerStatus.SAFE_APPROVED ->
                     TextButton(onClick = { onApprove(t.stableId, false) }) { Text("Undo") }
-                TrackerStatus.SAFE_BASELINE -> Icon(
-                    Icons.Filled.Verified, null,
-                    tint = VigilGreen, modifier = Modifier.size(20.dp)
-                )
+                TrackerStatus.SAFE_BASELINE ->
+                    TextButton(onClick = { onDistrust(t.stableId) }) { Text("Not mine") }
                 else -> TextButton(onClick = { onApprove(t.stableId, true) }) { Text("It's mine") }
             }
         }
@@ -324,7 +332,11 @@ private fun TrackerCard(t: TrackerEntity, onClick: () -> Unit, onApprove: (Strin
 }
 
 @Composable
-private fun TrackerDetail(t: TrackerEntity, onApprove: (String, Boolean) -> Unit) {
+private fun TrackerDetail(
+    t: TrackerEntity,
+    onApprove: (String, Boolean) -> Unit,
+    onDistrust: (String) -> Unit
+) {
     val status = statusOf(t)
     Column(Modifier.fillMaxWidth().padding(24.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -354,14 +366,19 @@ private fun TrackerDetail(t: TrackerEntity, onApprove: (String, Boolean) -> Unit
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
         Spacer(Modifier.height(20.dp))
-        if (status == TrackerStatus.SAFE_APPROVED) {
-            Button(onClick = { onApprove(t.stableId, false) }, modifier = Modifier.fillMaxWidth()) {
-                Text("Remove from approved")
-            }
-        } else if (status != TrackerStatus.SAFE_BASELINE) {
-            Button(onClick = { onApprove(t.stableId, true) }, modifier = Modifier.fillMaxWidth()) {
-                Text("This is mine — stop alerting")
-            }
+        when (status) {
+            TrackerStatus.SAFE_APPROVED ->
+                Button(onClick = { onApprove(t.stableId, false) }, modifier = Modifier.fillMaxWidth()) {
+                    Text("Remove from approved")
+                }
+            TrackerStatus.SAFE_BASELINE ->
+                Button(onClick = { onDistrust(t.stableId) }, modifier = Modifier.fillMaxWidth()) {
+                    Text("Not mine — re-check this tracker")
+                }
+            else ->
+                Button(onClick = { onApprove(t.stableId, true) }, modifier = Modifier.fillMaxWidth()) {
+                    Text("This is mine — stop alerting")
+                }
         }
         Spacer(Modifier.height(24.dp))
     }

@@ -51,6 +51,9 @@ class ScanService : LifecycleService() {
         private const val PRUNE_INTERVAL_MS = 6 * 3_600_000L
         private const val CLONE_COOLDOWN_MS = 2 * 3_600_000L
         private const val MIN_RECORD_INTERVAL_MS = 15_000L  // per-device DB throttle
+        private const val ALERT_CHANNEL_ID = "vigil_alerts"
+        private const val ALERT_NOTIF_ID = 0x5162
+        private const val CLONE_NOTIF_ID = 0x5163
 
         const val ACTION_START = "org.soulstone.vigil.action.START"
         const val ACTION_STOP = "org.soulstone.vigil.action.STOP"
@@ -112,8 +115,10 @@ class ScanService : LifecycleService() {
         pruneJob?.cancel()
         pruneJob = lifecycleScope.launch {
             while (true) {
-                delay(PRUNE_INTERVAL_MS)
+                // Prune first (frequent restarts previously meant the 6h-delayed
+                // prune rarely ran, so stale rotated identities accumulated).
                 runCatching { repo.prune() }.onFailure { Log.w(TAG, "prune failed: ${it.message}") }
+                delay(PRUNE_INTERVAL_MS)
             }
         }
     }
@@ -153,7 +158,9 @@ class ScanService : LifecycleService() {
     }
 
     private fun end() {
-        if (!_running.value) return
+        // No early-return guard: all stops below are idempotent, and begin() calls
+        // end() on a failed scanner start (when _running was never set) to make sure
+        // the location updates and foreground notification are released, not leaked.
         _running.value = false
         scanner.stop()
         location.stop()
@@ -190,9 +197,9 @@ class ScanService : LifecycleService() {
         val n = buildNotification(
             title = "Tracker following you",
             text = "${tracker.label} has been moving with you",
-            high = true
+            high = true, channelId = ALERT_CHANNEL_ID, ongoing = false
         )
-        getSystemService(NotificationManager::class.java)?.notify(NOTIFICATION_ID, n)
+        getSystemService(NotificationManager::class.java)?.notify(ALERT_NOTIF_ID, n)
         vibrate()
         Log.w(TAG, "ALERT: ${tracker.stableId} (${tracker.ecosystem})")
     }
@@ -201,9 +208,9 @@ class ScanService : LifecycleService() {
         val n = buildNotification(
             title = "Possible hidden tracker",
             text = "A rotating-ID tracker appears to be moving with you",
-            high = true
+            high = true, channelId = ALERT_CHANNEL_ID, ongoing = false
         )
-        getSystemService(NotificationManager::class.java)?.notify(NOTIFICATION_ID + 1, n)
+        getSystemService(NotificationManager::class.java)?.notify(CLONE_NOTIF_ID, n)
         vibrate()
         Log.w(TAG, "CLONE ALERT: rotating-id presence confirmed")
     }
@@ -221,7 +228,13 @@ class ScanService : LifecycleService() {
             @Suppress("DEPRECATION") getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
         }
 
-    private fun buildNotification(title: String, text: String, high: Boolean): Notification {
+    private fun buildNotification(
+        title: String,
+        text: String,
+        high: Boolean,
+        channelId: String = CHANNEL_ID,
+        ongoing: Boolean = true
+    ): Notification {
         val openIntent = Intent(this, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
         }
@@ -229,31 +242,48 @@ class ScanService : LifecycleService() {
             this, 0, openIntent,
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
-        return NotificationCompat.Builder(this, CHANNEL_ID)
+        return NotificationCompat.Builder(this, channelId)
             .setContentTitle(title)
             .setContentText(text)
             .setSmallIcon(android.R.drawable.ic_menu_view)
-            .setOngoing(true)
+            .setOngoing(ongoing)
+            .setAutoCancel(!ongoing)
             .setContentIntent(pi)
-            .setCategory(NotificationCompat.CATEGORY_SERVICE)
+            .setCategory(if (high) NotificationCompat.CATEGORY_ALARM else NotificationCompat.CATEGORY_SERVICE)
             .setPriority(if (high) NotificationCompat.PRIORITY_HIGH else NotificationCompat.PRIORITY_LOW)
-            .setOnlyAlertOnce(!high)
             .build()
     }
 
     private fun createNotificationChannel() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
         val mgr = getSystemService(NotificationManager::class.java) ?: return
-        if (mgr.getNotificationChannel(CHANNEL_ID) != null) return
-        mgr.createNotificationChannel(
-            NotificationChannel(
-                CHANNEL_ID,
-                getString(R.string.notification_channel_name),
-                NotificationManager.IMPORTANCE_LOW
-            ).apply {
-                description = getString(R.string.notification_channel_desc)
-                setShowBadge(false)
-            }
-        )
+        if (mgr.getNotificationChannel(CHANNEL_ID) == null) {
+            mgr.createNotificationChannel(
+                NotificationChannel(
+                    CHANNEL_ID,
+                    getString(R.string.notification_channel_name),
+                    NotificationManager.IMPORTANCE_LOW
+                ).apply {
+                    description = getString(R.string.notification_channel_desc)
+                    setShowBadge(false)
+                }
+            )
+        }
+        // Alerts get their OWN high-importance channel so a real "following you"
+        // warning actually makes noise + a heads-up banner. On Android 8+ channel
+        // importance overrides per-notification priority, so the ongoing LOW status
+        // channel could never sound an alert.
+        if (mgr.getNotificationChannel(ALERT_CHANNEL_ID) == null) {
+            mgr.createNotificationChannel(
+                NotificationChannel(
+                    ALERT_CHANNEL_ID,
+                    "Tracker alerts",
+                    NotificationManager.IMPORTANCE_HIGH
+                ).apply {
+                    description = "A tracker appears to be following you"
+                    enableVibration(true)
+                }
+            )
+        }
     }
 }

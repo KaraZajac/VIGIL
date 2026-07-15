@@ -80,6 +80,11 @@ interface TrackerDao {
     @Query("UPDATE trackers SET approved = :approved WHERE stableId = :id")
     suspend fun setApproved(id: String, approved: Boolean)
 
+    // User says a baseline-trusted tag is "not mine" — drop trust and restart the
+    // day clock so it doesn't immediately re-trust.
+    @Query("UPDATE trackers SET baselineSafe = 0, anchorDayCount = 0, lastAnchorDay = -1 WHERE stableId = :id")
+    suspend fun clearBaseline(id: String)
+
     // Rotated identities pile up (MAC rotation mints a new row each rotation); drop
     // stale, non-approved rows so the table and the UI list don't grow without bound.
     @Query("DELETE FROM trackers WHERE lastSeen < :cutoff AND approved = 0")

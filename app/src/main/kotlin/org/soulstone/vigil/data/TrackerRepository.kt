@@ -28,8 +28,15 @@ class TrackerRepository(private val db: VigilDatabase) {
 
     fun observeTrackers(): Flow<List<TrackerEntity>> = db.trackerDao().observeAll()
 
-    suspend fun setApproved(id: String, approved: Boolean) =
+    // Under the same lock as record() so a concurrent observation can't clobber the
+    // user's choice back to its stale value.
+    suspend fun setApproved(id: String, approved: Boolean) = mutex.withLock {
         db.trackerDao().setApproved(id, approved)
+    }
+
+    suspend fun clearBaseline(id: String) = mutex.withLock {
+        db.trackerDao().clearBaseline(id)
+    }
 
     suspend fun prune(retentionDays: Int = RETENTION_DAYS) {
         val cutoff = System.currentTimeMillis() - retentionDays * BaselineManager.DAY_MS
@@ -62,6 +69,15 @@ class TrackerRepository(private val db: VigilDatabase) {
         )
 
         val existing = db.trackerDao().get(obs.stableId)
+        val approved = existing?.approved ?: false
+
+        // Co-movement assessment first — it decides both display AND whether this
+        // tag is safe to baseline. Always computed (UI shows the evidence numbers).
+        val since = now - CoMovementEvaluator.WINDOW_MS
+        val recent = db.sightingDao().recentFor(obs.stableId, since)
+        val t = CoMovementEvaluator.thresholdsFor(sensitivity)
+        val assessment = CoMovementEvaluator.evaluate(recent, obs.ecosystem, t)
+        val coMoving = assessment.riskState != RiskState.OBSERVED
 
         // --- baseline: learn tags that live where you live -------------------
         var lastAnchorDay = existing?.lastAnchorDay ?: -1L
@@ -69,7 +85,10 @@ class TrackerRepository(private val db: VigilDatabase) {
         var baselineSafe = existing?.baselineSafe ?: false
         if (geohash6 != null) {
             val isAnchor = BaselineManager.noteLocation(db.placeDao(), geohash6, now)
-            if (isAnchor) {
+            // ONLY baseline-trust a tag that is NOT co-moving with you. A planted
+            // stalker tag co-moves (that's the whole detection), so it stays
+            // SUSPICIOUS/ALERTING and must never be auto-trusted into silence.
+            if (isAnchor && !coMoving) {
                 val day = now / BaselineManager.DAY_MS
                 if (day != lastAnchorDay) {
                     lastAnchorDay = day
@@ -78,15 +97,9 @@ class TrackerRepository(private val db: VigilDatabase) {
                 if (anchorDayCount >= BaselineManager.BASELINE_MIN_DAYS) baselineSafe = true
             }
         }
+        // Safety revoke: if a previously-trusted tag ever starts co-moving, drop trust.
+        if (baselineSafe && coMoving) baselineSafe = false
 
-        val approved = existing?.approved ?: false
-
-        // Always compute the co-movement assessment so the UI can show grounded
-        // evidence; only *escalation* is suppressed for trusted (approved/baseline) tags.
-        val since = now - CoMovementEvaluator.WINDOW_MS
-        val recent = db.sightingDao().recentFor(obs.stableId, since)
-        val t = CoMovementEvaluator.thresholdsFor(sensitivity)
-        val assessment = CoMovementEvaluator.evaluate(recent, obs.ecosystem, t)
         val riskState = if (approved || baselineSafe) RiskState.OBSERVED else assessment.riskState
 
         val wasAlerting = existing?.riskState == RiskState.ALERTING.name

@@ -26,15 +26,16 @@ object TrackerParser {
 
         // --- Apple Find My (manufacturer data, company 0x004C) ---
         record.getManufacturerSpecificData(Sig.APPLE_COMPANY_ID)?.let { d ->
-            if (d.isNotEmpty() && (d[0].toInt() and 0xFF) == Sig.APPLE_TYPE_FINDMY) {
-                // Android strips the 2-byte company id, so d = [type(0x12),
-                // length(0x19), status, key(22), keyTopBits, hint]. The maintained
-                // bit lives in the status byte (index 2): set => near owner,
-                // cleared/absent => treat as separated.
-                val status = if (d.size > 2) d[2].toInt() and 0xFF else 0
+            // Require the FULL offline-finding frame. After Android strips the company
+            // id, d = [type, len, status, key(22), keyTopBits, hint] (~27 bytes). Short
+            // "nearby" frames carry no key — ignore them rather than fabricate a shared
+            // identity from the type/status bytes, which merged many distinct devices
+            // into one phantom "tracker" and misclassified it as separated.
+            if (d.size >= 25 && (d[0].toInt() and 0xFF) == Sig.APPLE_TYPE_FINDMY) {
+                val status = d[2].toInt() and 0xFF   // maintained bit set => near owner
                 val separated = if ((status and Sig.APPLE_STATUS_MAINTAINED_BIT) != 0)
                     SeparatedState.NEAR_OWNER else SeparatedState.SEPARATED
-                val keyBytes = if (d.size >= 25) d.copyOfRange(3, 25) else d
+                val keyBytes = d.copyOfRange(3, 25)
                 return TrackerObservation(
                     stableId = "apple:" + toHex(keyBytes),
                     ecosystem = TrackerEcosystem.APPLE_FIND_MY,

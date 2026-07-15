@@ -55,9 +55,12 @@ class BleTrackerScanner(
                 byteArrayOf(0xFF.toByte())
             ).build()
         )
-        // FMDN / Samsung / Tile / DULT — match their service UUIDs.
+        // FMDN / Samsung / Tile / DULT — match by SERVICE DATA presence, not the
+        // service-UUID list. These carry their payload in service data and may not
+        // advertise the plain UUID-list entry, so setServiceUuid can miss them
+        // entirely (AirGuard uses service-data presence filters for exactly this).
         for (uuid in TrackerSignatures.trackerServiceUuids) {
-            add(ScanFilter.Builder().setServiceUuid(uuid).build())
+            add(ScanFilter.Builder().setServiceData(uuid, ByteArray(0)).build())
         }
     }
 

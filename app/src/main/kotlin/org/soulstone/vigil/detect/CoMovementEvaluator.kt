@@ -59,11 +59,14 @@ object CoMovementEvaluator {
         val sorted = sightings.sortedBy { it.timestamp }
 
         // Debounce: one effective sighting per DEDUP_MS so a chatty tag at 2s
-        // intervals doesn't trivially clear the count.
+        // intervals doesn't trivially clear the count. lastCounted is NULLABLE and
+        // always counts the first sighting — the old `Long.MIN_VALUE` seed overflowed
+        // (timestamp - Long.MIN_VALUE wraps negative), which pinned `effective` at 0
+        // and made the detector unable to EVER alert. (Caught by unit test.)
         var effective = 0
-        var lastCounted = Long.MIN_VALUE
+        var lastCounted: Long? = null
         for (s in sorted) {
-            if (s.timestamp - lastCounted >= DEDUP_MS) {
+            if (lastCounted == null || s.timestamp - lastCounted >= DEDUP_MS) {
                 effective++
                 lastCounted = s.timestamp
             }
