@@ -26,8 +26,11 @@ that idea.
 
 VIGIL requests **no `INTERNET` permission at all.** There is no server, no account,
 no telemetry. Every tracker, every sighting, and the entire learned baseline live
-in an on-device SQLite database and never leave the phone. It listens only — it
-never transmits, probes, or interferes with any device.
+in an on-device SQLite database and never leave the phone. **Detection is entirely
+passive — it listens only.** The one exception is the user-initiated **"Make it
+ring"** action, which connects to a tracker you already suspect and asks it to play
+a sound (the DULT-standard way for a victim to locate a hidden tag); nothing is
+transmitted unless you tap it.
 
 ---
 
@@ -70,6 +73,17 @@ Two trust signals suppress false alarms:
   *anchors*, and a tracker seen at an anchor across several distinct days is
   auto-marked **Known (home)**. So the household tags that are always around you
   fall silent on their own, entirely on-device.
+
+## Finding a tracker
+
+Tap any tracker for two ways to physically locate it:
+- **Make it ring** — connects over GATT and plays the tracker's own sound. Works for
+  AirTags (native `0xAF` sound), Google Find My Device, and DULT tags (Chipolo,
+  Pebblebee, eufy, Motorola). Samsung SmartTag and Tile expose no non-owner ring, so
+  VIGIL points you to the SmartThings / Tile app instead.
+- **Hot/cold finder** — a passive proximity meter that turns live signal strength into
+  a warmer/colder readout. It still works on **silent or modified tags that refuse to
+  ring**, which is exactly when you need it most.
 
 ## The hard part — catching clones (problem #1)
 
