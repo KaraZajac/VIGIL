@@ -14,6 +14,8 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.launch
@@ -24,6 +26,8 @@ import org.soulstone.vigil.ring.TrackerRinger
 import org.soulstone.vigil.data.settings.Settings
 import org.soulstone.vigil.service.ScanService
 import org.soulstone.vigil.ui.MainScreen
+import org.soulstone.vigil.ui.OnboardingScreen
+import org.soulstone.vigil.ui.SafetyScreen
 import org.soulstone.vigil.ui.theme.VigilTheme
 
 class MainActivity : ComponentActivity() {
@@ -68,36 +72,48 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             VigilTheme {
-                val running by ScanService.running.collectAsState()
-                val trackers by repo.observeTrackers().collectAsState(initial = emptyList())
-                val sensitivity by settings.sensitivity.collectAsState()
-                val granted by permissionsGranted
+                val onboarded by settings.onboarded.collectAsState()
+                var showSafety by remember { mutableStateOf(false) }
+                when {
+                    !onboarded -> OnboardingScreen(onFinish = {
+                        settings.setOnboarded(true)
+                        if (!hasEssentialPermissions()) permissionLauncher.launch(requiredPermissions)
+                    })
+                    showSafety -> SafetyScreen(onBack = { showSafety = false })
+                    else -> {
+                        val running by ScanService.running.collectAsState()
+                        val trackers by repo.observeTrackers().collectAsState(initial = emptyList())
+                        val sensitivity by settings.sensitivity.collectAsState()
+                        val granted by permissionsGranted
 
-                MainScreen(
-                    running = running,
-                    trackers = trackers,
-                    sensitivity = sensitivity,
-                    permissionMessage = if (granted) null
-                    else "Grant Bluetooth + location to start watching",
-                    onStartStop = {
-                        if (running) {
-                            ScanService.stop(this)
-                        } else if (granted) {
-                            ScanService.start(this)
-                        } else {
-                            permissionLauncher.launch(requiredPermissions)
-                        }
-                    },
-                    onSetSensitivity = { settings.setSensitivity(it) },
-                    onApprove = { id, approved ->
-                        lifecycleScope.launch { repo.setApproved(id, approved) }
-                    },
-                    onDistrust = { id ->
-                        lifecycleScope.launch { repo.clearBaseline(id) }
-                    },
-                    onRing = { tracker -> ringTracker(tracker) },
-                    onClearAll = { lifecycleScope.launch { repo.clearAll() } }
-                )
+                        MainScreen(
+                            running = running,
+                            trackers = trackers,
+                            sensitivity = sensitivity,
+                            permissionMessage = if (granted) null
+                            else "Grant Bluetooth + location to start watching",
+                            onStartStop = {
+                                if (running) {
+                                    ScanService.stop(this)
+                                } else if (granted) {
+                                    ScanService.start(this)
+                                } else {
+                                    permissionLauncher.launch(requiredPermissions)
+                                }
+                            },
+                            onSetSensitivity = { settings.setSensitivity(it) },
+                            onApprove = { id, approved ->
+                                lifecycleScope.launch { repo.setApproved(id, approved) }
+                            },
+                            onDistrust = { id ->
+                                lifecycleScope.launch { repo.clearBaseline(id) }
+                            },
+                            onRing = { tracker -> ringTracker(tracker) },
+                            onClearAll = { lifecycleScope.launch { repo.clearAll() } },
+                            onOpenSafety = { showSafety = true }
+                        )
+                    }
+                }
             }
         }
     }

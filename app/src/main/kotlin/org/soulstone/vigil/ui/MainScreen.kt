@@ -32,6 +32,7 @@ import androidx.compose.material.icons.filled.Bluetooth
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.GppMaybe
+import androidx.compose.material.icons.filled.HealthAndSafety
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Radar
 import androidx.compose.material.icons.filled.Shield
@@ -90,7 +91,8 @@ fun MainScreen(
     onApprove: (String, Boolean) -> Unit,
     onDistrust: (String) -> Unit,
     onRing: (TrackerEntity) -> Unit,
-    onClearAll: () -> Unit
+    onClearAll: () -> Unit,
+    onOpenSafety: () -> Unit
 ) {
     var detail by remember { mutableStateOf<TrackerEntity?>(null) }
     var finding by remember { mutableStateOf<TrackerEntity?>(null) }
@@ -119,6 +121,13 @@ fun MainScreen(
                     }
                 },
                 actions = {
+                    IconButton(onClick = onOpenSafety) {
+                        Icon(
+                            Icons.Filled.HealthAndSafety,
+                            contentDescription = "Safety & help",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
                     if (trackers.isNotEmpty()) {
                         IconButton(onClick = onClearAll) {
                             Icon(
@@ -228,7 +237,8 @@ fun MainScreen(
                 onApprove = { id, a -> onApprove(id, a); detail = null },
                 onDistrust = { id -> onDistrust(id); detail = null },
                 onFind = { dev -> ScanService.setFinderTarget(dev.stableId); finding = dev; detail = null },
-                onRing = onRing
+                onRing = onRing,
+                onSafety = { onOpenSafety(); detail = null }
             )
         }
     }
@@ -378,7 +388,8 @@ private fun TrackerDetail(
     onApprove: (String, Boolean) -> Unit,
     onDistrust: (String) -> Unit,
     onFind: (TrackerEntity) -> Unit,
-    onRing: (TrackerEntity) -> Unit
+    onRing: (TrackerEntity) -> Unit,
+    onSafety: () -> Unit
 ) {
     val status = statusOf(t)
     Column(Modifier.fillMaxWidth().padding(24.dp)) {
@@ -389,6 +400,18 @@ private fun TrackerDetail(
         }
         Spacer(Modifier.height(4.dp))
         Text(statusLabel(status), color = statusColor(status), fontWeight = FontWeight.SemiBold)
+        if (status == TrackerStatus.ALERTING || status == TrackerStatus.SUSPICIOUS) {
+            Spacer(Modifier.height(14.dp))
+            Button(
+                onClick = onSafety,
+                modifier = Modifier.fillMaxWidth(),
+                colors = ButtonDefaults.buttonColors(containerColor = VigilRed, contentColor = Color(0xFF11111B))
+            ) {
+                Icon(Icons.Filled.HealthAndSafety, null, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.size(8.dp))
+                Text("What should I do?", fontWeight = FontWeight.Bold)
+            }
+        }
         Spacer(Modifier.height(16.dp))
 
         DetailRow("Signal (last / peak)", "${t.lastRssi} / ${t.peakRssi} dBm")

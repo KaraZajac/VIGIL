@@ -25,8 +25,16 @@ class Settings private constructor(context: Context) {
         _sensitivity.value = value
     }
 
+    private val _onboarded = MutableStateFlow(prefs.getBoolean(KEY_ONBOARDED, false))
+    val onboarded: StateFlow<Boolean> = _onboarded.asStateFlow()
+    fun setOnboarded(value: Boolean) {
+        prefs.edit().putBoolean(KEY_ONBOARDED, value).apply()
+        _onboarded.value = value
+    }
+
     companion object {
         private const val KEY_SENSITIVITY = "sensitivity"
+        private const val KEY_ONBOARDED = "onboarded"
 
         @Volatile private var INSTANCE: Settings? = null
         fun get(context: Context): Settings = INSTANCE ?: synchronized(this) {

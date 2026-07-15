@@ -13,8 +13,8 @@ android {
         applicationId = "org.soulstone.vigil"
         minSdk = 26
         targetSdk = 35
-        versionCode = 8
-        versionName = "0.1.7"
+        versionCode = 9
+        versionName = "0.1.8"
     }
 
     // Fixed debug keystore committed to the repo (a debug key is non-secret — its
