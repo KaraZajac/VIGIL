@@ -1,13 +1,32 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- VIGIL "Radar Eye" — a watchful eye whose iris is a radar target. Content sits
+     within the adaptive-icon safe zone (centre ~66dp of the 108dp canvas). -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp"
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
+    <!-- eye outline -->
     <path
-        android:fillColor="#1FAA59"
-        android:pathData="M54,30 m-18,0 a18,18 0 1,0 36,0 a18,18 0 1,0 -36,0" />
+        android:pathData="M26,54 Q54,30 82,54 Q54,78 26,54 Z"
+        android:strokeColor="#89B4FA"
+        android:strokeWidth="4.5"
+        android:strokeLineJoin="round"
+        android:fillColor="#00000000" />
+    <!-- radar iris — outer ring -->
     <path
-        android:fillColor="#F4F6FA"
-        android:pathData="M54,30 m-6,0 a6,6 0 1,0 12,0 a6,6 0 1,0 -12,0" />
+        android:pathData="M54,54 m-11,0 a11,11 0 1,0 22,0 a11,11 0 1,0 -22,0"
+        android:strokeColor="#89B4FA"
+        android:strokeWidth="3.2"
+        android:fillColor="#00000000" />
+    <!-- radar iris — inner ring -->
+    <path
+        android:pathData="M54,54 m-6.5,0 a6.5,6.5 0 1,0 13,0 a6.5,6.5 0 1,0 -13,0"
+        android:strokeColor="#B4BEFE"
+        android:strokeWidth="2.8"
+        android:fillColor="#00000000" />
+    <!-- centre contact (the detected device) -->
+    <path
+        android:pathData="M54,54 m-3.2,0 a3.2,3.2 0 1,0 6.4,0 a3.2,3.2 0 1,0 -6.4,0"
+        android:fillColor="#A6E3A1" />
 </vector>
