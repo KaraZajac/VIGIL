@@ -1,6 +1,7 @@
 package org.soulstone.vigil.ui
 
 import android.text.format.DateUtils
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.material.icons.filled.Sensors
@@ -432,6 +433,8 @@ private fun DetailRow(label: String, value: String) {
  *  proximity meter. Works even on silent/modified tags that refuse to ring. */
 @Composable
 private fun FinderScreen(t: TrackerEntity, onRing: (TrackerEntity) -> Unit, onClose: () -> Unit) {
+    // Intercept system back so it closes the finder instead of exiting the app.
+    BackHandler(onBack = onClose)
     val rssi by ScanService.finderRssi.collectAsState()
     val smoothed = remember { mutableStateOf(-100f) }
     LaunchedEffect(rssi) { rssi?.let { smoothed.value = 0.35f * it + 0.65f * smoothed.value } }
