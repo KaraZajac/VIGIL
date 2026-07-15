@@ -28,6 +28,8 @@ import org.soulstone.vigil.data.db.TrackerEntity
 import org.soulstone.vigil.data.db.VigilDatabase
 import org.soulstone.vigil.data.location.LocationProvider
 import org.soulstone.vigil.data.settings.Settings
+import org.soulstone.vigil.detect.PresenceEngine
+import org.soulstone.vigil.model.SeparatedState
 import org.soulstone.vigil.model.TrackerObservation
 import org.soulstone.vigil.scan.BleTrackerScanner
 
@@ -46,6 +48,7 @@ class ScanService : LifecycleService() {
         private const val CHANNEL_ID = "vigil_watch"
         private const val NOTIFICATION_ID = 0x5161  // "VIGIL"
         private const val PRUNE_INTERVAL_MS = 6 * 3_600_000L
+        private const val CLONE_COOLDOWN_MS = 2 * 3_600_000L
 
         const val ACTION_START = "org.soulstone.vigil.action.START"
         const val ACTION_STOP = "org.soulstone.vigil.action.STOP"
@@ -71,6 +74,8 @@ class ScanService : LifecycleService() {
     private lateinit var repo: TrackerRepository
     private lateinit var location: LocationProvider
     private lateinit var scanner: BleTrackerScanner
+    private val presence = PresenceEngine()
+    private var lastCloneAlertMs = 0L
     private var pruneJob: Job? = null
 
     override fun onCreate() {
@@ -93,6 +98,7 @@ class ScanService : LifecycleService() {
 
     private fun begin() {
         if (_running.value) return
+        presence.reset()
         startInForeground()
         location.start()  // best-effort; scanning still runs without a fix (just no co-movement)
         if (!scanner.start()) {
@@ -110,8 +116,23 @@ class ScanService : LifecycleService() {
     }
 
     private fun onObservation(obs: TrackerObservation) {
+        val fix = location.location.value
+
+        // Rotation-clone presence engine (problem #1) — fed synchronously so its
+        // streaming state stays ordered. Only a CONFIRMED verdict raises a user
+        // alert; softer tiers stay silent until validated on real captures.
+        if (obs.separated == SeparatedState.SEPARATED) {
+            val v = presence.onSighting(obs.stableId, obs.rssi, obs.timestampMs, fix?.latitude, fix?.longitude)
+            if (v.tier == PresenceEngine.Tier.CONFIRMED &&
+                obs.timestampMs - lastCloneAlertMs > CLONE_COOLDOWN_MS
+            ) {
+                lastCloneAlertMs = obs.timestampMs
+                raiseCloneAlert()
+            }
+        }
+
+        // Temporal co-movement (identity path) — persisted + evaluated off-thread.
         lifecycleScope.launch {
-            val fix = location.location.value
             val result = runCatching {
                 repo.record(obs, fix?.latitude, fix?.longitude, settings.sensitivity.value)
             }.getOrNull() ?: return@launch
@@ -161,6 +182,17 @@ class ScanService : LifecycleService() {
         getSystemService(NotificationManager::class.java)?.notify(NOTIFICATION_ID, n)
         vibrate()
         Log.w(TAG, "ALERT: ${tracker.stableId} (${tracker.ecosystem})")
+    }
+
+    private fun raiseCloneAlert() {
+        val n = buildNotification(
+            title = "Possible hidden tracker",
+            text = "A rotating-ID tracker appears to be moving with you",
+            high = true
+        )
+        getSystemService(NotificationManager::class.java)?.notify(NOTIFICATION_ID + 1, n)
+        vibrate()
+        Log.w(TAG, "CLONE ALERT: rotating-id presence confirmed")
     }
 
     private fun vibrate() {

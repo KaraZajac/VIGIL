@@ -407,7 +407,7 @@ data/db/VigilDatabase.kt    Room: trackers, 14-day sightings, baseline places
 data/TrackerRepository.kt   ingest + baseline + evaluate on each sighting
 detect/CoMovementEvaluator  the co-movement test + RSSI proximity gate
 detect/BaselineManager.kt   anchor-place learning -> auto-trust household tags
-detect/PresenceEngine.kt    (next) the rotation-clone engine of §5
+detect/PresenceEngine.kt    the rotation-clone engine of §5 (v1, unit-tested)
 ```
 
 **Privacy properties.** The manifest declares **no `INTERNET` permission**; VIGIL
@@ -546,5 +546,6 @@ prototype and an open design, and invite the empirical evaluation §7 lays out.
 15. M. Datar, A. Gionis, P. Indyk, R. Motwani. "Maintaining Stream Statistics over Sliding Windows." *SODA* 2002.
 
 *This working paper accompanies the VIGIL reference implementation. The rotation-clone
-engine (§5) is fully specified in `docs/detection-rotation-clone.md` and is designed
-but not yet wired into the shipping build.*
+engine (§5) is specified in `docs/detection-rotation-clone.md` and implemented as a
+first version in `detect/PresenceEngine.kt` (unit-tested against synthetic clone/ambient
+traces) and wired into the scan service; field-tuning against real captures remains.*

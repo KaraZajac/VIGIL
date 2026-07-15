@@ -26,9 +26,13 @@ jobs:
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Build debug APK
+      - name: Run unit tests
         run: |
           chmod +x ./gradlew
+          ./gradlew :app:testDebugUnitTest --stacktrace --no-daemon
+
+      - name: Build debug APK
+        run: |
           ./gradlew :app:assembleDebug --stacktrace --no-daemon
 
       - name: Stage APK

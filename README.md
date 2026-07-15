@@ -85,7 +85,9 @@ standards-compliant tracker is allowed to. The full algorithm — a CUSUM churn
 trigger, an identity-agnostic presence-track confirmer, and a co-movement gate,
 plus the "identity-path × churn-path squeeze" that leaves no safe rotation rate —
 is designed in **[docs/detection-rotation-clone.md](docs/detection-rotation-clone.md)**.
-The `detect/` package ships the co-movement v1; the presence engine slots in next.
+It's now implemented as a first version in `detect/PresenceEngine.kt` (unit-tested
+against synthetic clone/ambient traces) and wired into the scan service to raise a
+distinct rotating-tracker alert; field-tuning against real captures is what remains.
 
 ## Architecture
 
@@ -127,10 +129,10 @@ an APK to a GitHub Release on `v*` tags.
 ## Status
 
 Prototype. In place: BLE scan + filters, per-ecosystem parsing, Room temporal
-store, co-movement evaluator with RSSI gate, allowlist, learned baseline,
-foreground service, Compose UI. **Not yet:** the rotation-clone presence engine
-(designed, not wired), GATT play-sound / DULT get-identifier, and empirical
-validation. Before trusting the parser, capture real devices with nRF Connect —
+store, co-movement evaluator with RSSI gate, allowlist, learned baseline, the
+rotation-clone presence engine (v1, unit-tested), foreground service, Compose UI.
+**Not yet:** field-tuning the clone engine on real captures, GATT play-sound /
+DULT get-identifier, and empirical validation. Before trusting the parser, capture real devices with nRF Connect —
 the SmartTag2 offsets are inferred from gen-1, and the Tile/AirTag reversing is a
 couple of years old.
 
