@@ -9,7 +9,9 @@ import androidx.compose.material3.FilledTonalButton
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.res.painterResource
 import org.soulstone.vigil.service.ScanService
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -70,6 +72,7 @@ import org.soulstone.vigil.BuildConfig
 import org.soulstone.vigil.data.db.TrackerEntity
 import org.soulstone.vigil.model.Sensitivity
 import org.soulstone.vigil.model.TrackerEcosystem
+import org.soulstone.vigil.R
 import org.soulstone.vigil.model.TrackerStatus
 import org.soulstone.vigil.ui.theme.VigilGreen
 import org.soulstone.vigil.ui.theme.VigilPeach
@@ -106,7 +109,11 @@ fun MainScreen(
             TopAppBar(
                 title = {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Filled.Shield, null, tint = MaterialTheme.colorScheme.primary)
+                        Image(
+                            painterResource(R.drawable.vigil_logo),
+                            contentDescription = null,
+                            modifier = Modifier.size(26.dp)
+                        )
                         Spacer(Modifier.size(8.dp))
                         Text("VIGIL", fontWeight = FontWeight.Bold)
                     }

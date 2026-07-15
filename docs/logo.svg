@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 108 108" width="108" height="108" role="img" aria-label="VIGIL">
+  <defs>
+    <radialGradient id="bg" cx="50%" cy="36%" r="78%">
+      <stop offset="0" stop-color="#2a2a40"/>
+      <stop offset="1" stop-color="#11111b"/>
+    </radialGradient>
+  </defs>
+  <rect x="4" y="4" width="100" height="100" rx="26" fill="url(#bg)" stroke="#313244"/>
+  <path d="M26 54 Q54 30 82 54 Q54 78 26 54 Z" fill="none" stroke="#89b4fa" stroke-width="4.5" stroke-linejoin="round"/>
+  <circle cx="54" cy="54" r="11" fill="none" stroke="#89b4fa" stroke-width="3.2"/>
+  <circle cx="54" cy="54" r="6.5" fill="none" stroke="#b4befe" stroke-width="2.8"/>
+  <circle cx="54" cy="54" r="3.2" fill="#a6e3a1"/>
+</svg>

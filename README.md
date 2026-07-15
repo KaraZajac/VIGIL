@@ -1,6 +1,12 @@
+<div align="center">
+
+<img src="docs/logo.png" alt="VIGIL" width="96" height="96" />
+
 # VIGIL
 
 **What's been following you?**
+
+</div>
 
 A native Android (Kotlin) app that watches for personal item-trackers — Apple
 AirTags, Tile, Samsung Galaxy SmartTags, and Google Find My Device / DULT tags —
