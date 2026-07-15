@@ -44,6 +44,13 @@ class TrackerRepository(private val db: VigilDatabase) {
         db.trackerDao().pruneStale(cutoff)
     }
 
+    /** Wipe the whole tracker list + sighting history (they re-populate as devices
+     *  are re-detected). Keeps learned baseline places. */
+    suspend fun clearAll() = mutex.withLock {
+        db.trackerDao().clearAll()
+        db.sightingDao().clearAll()
+    }
+
     /**
      * Ingest one sighting. Persists it, updates the baseline, and re-evaluates the
      * tracker's risk. Returns the updated row and whether this crossed into ALERTING.

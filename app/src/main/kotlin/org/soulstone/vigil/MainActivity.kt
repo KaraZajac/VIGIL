@@ -95,7 +95,8 @@ class MainActivity : ComponentActivity() {
                     onDistrust = { id ->
                         lifecycleScope.launch { repo.clearBaseline(id) }
                     },
-                    onRing = { tracker -> ringTracker(tracker) }
+                    onRing = { tracker -> ringTracker(tracker) },
+                    onClearAll = { lifecycleScope.launch { repo.clearAll() } }
                 )
             }
         }

@@ -91,6 +91,9 @@ interface TrackerDao {
     // stale, non-approved rows so the table and the UI list don't grow without bound.
     @Query("DELETE FROM trackers WHERE lastSeen < :cutoff AND approved = 0")
     suspend fun pruneStale(cutoff: Long)
+
+    @Query("DELETE FROM trackers")
+    suspend fun clearAll()
 }
 
 @Dao
@@ -103,6 +106,9 @@ interface SightingDao {
 
     @Query("DELETE FROM sightings WHERE timestamp < :cutoff")
     suspend fun prune(cutoff: Long)
+
+    @Query("DELETE FROM sightings")
+    suspend fun clearAll()
 }
 
 @Dao

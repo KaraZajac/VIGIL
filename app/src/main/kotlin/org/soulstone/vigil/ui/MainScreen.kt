@@ -28,6 +28,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Bluetooth
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.GppMaybe
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Radar
@@ -42,6 +43,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Scaffold
@@ -84,7 +86,8 @@ fun MainScreen(
     onSetSensitivity: (Sensitivity) -> Unit,
     onApprove: (String, Boolean) -> Unit,
     onDistrust: (String) -> Unit,
-    onRing: (TrackerEntity) -> Unit
+    onRing: (TrackerEntity) -> Unit,
+    onClearAll: () -> Unit
 ) {
     var detail by remember { mutableStateOf<TrackerEntity?>(null) }
     var finding by remember { mutableStateOf<TrackerEntity?>(null) }
@@ -109,6 +112,15 @@ fun MainScreen(
                     }
                 },
                 actions = {
+                    if (trackers.isNotEmpty()) {
+                        IconButton(onClick = onClearAll) {
+                            Icon(
+                                Icons.Filled.DeleteSweep,
+                                contentDescription = "Clear all trackers",
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
                     Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(end = 12.dp)) {
                         Icon(
                             Icons.Filled.Lock, null,
