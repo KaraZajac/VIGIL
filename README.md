@@ -28,6 +28,18 @@ that idea.
 
 ---
 
+## Screenshots
+
+<p align="center">
+  <img src="docs/screenshots/main.png" width="230" alt="VIGIL watch list — whether anything has been following you" />
+  &nbsp;
+  <img src="docs/screenshots/finder-searching.png" width="230" alt="Hot/cold finder searching for a tracker" />
+  &nbsp;
+  <img src="docs/screenshots/finder-close.png" width="230" alt="Finder homing in on a device, with Make it ring" />
+</p>
+
+<p align="center"><sub>The watch list &nbsp;·&nbsp; the hot/cold finder searching &nbsp;·&nbsp; homing in on a tracker, with “Make it ring”</sub></p>
+
 ## Privacy first — fully offline
 
 VIGIL requests **no `INTERNET` permission at all.** There is no server, no account,
