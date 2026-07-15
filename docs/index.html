@@ -1,0 +1,375 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>VIGIL — what's been following you?</title>
+<meta name="description" content="A native Android app that watches for personal item-trackers — AirTags, Tile, Samsung SmartTags, Google Find My — travelling with you over time. Fully offline, no INTERNET permission. The temporal counterpart to OVERWATCH.">
+<meta property="og:title" content="VIGIL — what's been following you?">
+<meta property="og:description" content="Android app that flags AirTags, Tile, SmartTags & Find My trackers travelling WITH you over time — even rotating-key clones. Fully offline, listens only.">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://vigil.netslum.io/">
+<meta property="og:image" content="https://vigil.netslum.io/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:image" content="https://vigil.netslum.io/og.png">
+<meta name="theme-color" content="#07070d">
+<link rel="icon" type="image/svg+xml" href="logo.svg">
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet">
+
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div class="bg-mesh" aria-hidden="true">
+  <div class="mesh-blob mesh-blob-1"></div>
+  <div class="mesh-blob mesh-blob-2"></div>
+  <div class="mesh-blob mesh-blob-3"></div>
+</div>
+
+<nav class="nav">
+  <div class="container nav-inner">
+    <a class="nav-brand" href="#">
+      <img class="nav-logo" src="logo.svg" width="30" height="30" alt="" aria-hidden="true">
+      VIGIL
+    </a>
+    <div class="nav-links">
+      <a href="#detects">What it detects</a>
+      <a href="#decides">How it decides</a>
+      <a href="#clones">Clones</a>
+      <a href="#download">Download</a>
+      <a class="nav-github" href="https://github.com/KaraZajac/VIGIL" aria-label="GitHub">
+        <svg height="18" viewBox="0 0 16 16" width="18" fill="currentColor" aria-hidden="true">
+          <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0 0 16 8c0-4.42-3.58-8-8-8z"/>
+        </svg>
+      </a>
+    </div>
+  </div>
+</nav>
+
+<!-- ──────────────── HERO ──────────────── -->
+<header class="hero">
+  <div class="container hero-inner">
+    <div class="hero-eyebrow">
+      <span class="dot dot-pulse"></span>
+      v0.1.7 · Android · prototype
+    </div>
+    <h1 class="hero-title">
+      <span class="display-wordmark">VIGIL</span>
+    </h1>
+    <p class="hero-tag">
+      <strong>What's been following you?</strong> A native Android app that
+      watches for personal item-trackers — AirTags, Tile, Samsung SmartTags,
+      Google Find My — that are <strong>travelling with you over time</strong>.
+      <span class="hero-tag-pop">A tracker being near you means nothing. The signal is persistence.</span>
+    </p>
+
+    <div class="phone-hero">
+      <img class="phone" src="img/vigil-main.png" width="1096" height="2560"
+        alt="VIGIL main screen: a green &quot;You're clear — nothing has been following you&quot; card, a Stop Watching button, and a High/Medium/Low sensitivity selector." loading="eager">
+    </div>
+
+    <div class="stats-row" id="stats-row">
+      <div class="stat-chip"><span class="num" data-target="5">0</span><span>tracker ecosystems</span></div>
+      <div class="stat-chip stat-vfy"><span class="num" data-target="3">0</span><span>escalation tiers</span></div>
+      <div class="stat-chip"><span class="num" data-target="0">0</span><span>internet permission</span></div>
+      <div class="stat-chip"><span class="num">v0.1.7</span><span>latest APK</span></div>
+    </div>
+
+    <div class="cta-row">
+      <a class="btn btn-primary" href="https://github.com/KaraZajac/VIGIL/releases/latest">
+        ↓ Download APK
+      </a>
+      <a class="btn" href="#clones">The clone problem</a>
+      <a class="btn btn-ghost" href="https://github.com/KaraZajac/VIGIL">
+        <svg height="16" viewBox="0 0 16 16" width="16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>
+        Source on GitHub
+      </a>
+    </div>
+
+    <p class="hero-warn">Prototype / work in progress. Debug-signed APK — sideload; no Play Store. <a href="https://github.com/KaraZajac/VIGIL">Read the README.</a></p>
+  </div>
+</header>
+
+<!-- ──────────────── OVERWATCH SIBLING ──────────────── -->
+<section class="section section-callout reveal">
+  <div class="container">
+    <div class="callout">
+      <div class="callout-mark">🛰</div>
+      <div>
+        <h3>The temporal counterpart to <a href="https://overwatch.netslum.io">OVERWATCH</a></h3>
+        <p>
+          <strong>OVERWATCH is spatial</strong> — what surveillance is watching
+          <em>this place</em>, right now. <strong>VIGIL is temporal</strong> —
+          what has been with <em>you</em>, across time and places. VIGIL reuses
+          OVERWATCH's proven passive-scanning stack and adds a persistent
+          on-device store to reason about a tracker's history.
+        </p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ──────────────── WHAT IT DETECTS ──────────────── -->
+<section id="detects" class="section section-bento reveal">
+  <div class="container">
+    <div class="section-head">
+      <span class="section-tag">what it detects</span>
+      <h2>Five ecosystems. One tell: separated from its owner.</h2>
+      <p class="lead">VIGIL recognises each BLE wire format and, where the
+      ecosystem signals it, filters to the <strong>separated-from-owner</strong>
+      state — the only state in which a <em>following</em> tracker is even
+      detectable. Chipolo, Pebblebee, eufy and the rest inherit whichever
+      network their SKU joined, so VIGIL detects the <em>network</em>.</p>
+    </div>
+
+    <div class="bento">
+      <article class="bento-card">
+        <div class="bento-icon">🍎</div>
+        <h3>Apple Find My / AirTag</h3>
+        <p>Mfg data, company <code>0x004C</code>, type <code>0x12</code>. Separated when the "maintained" status bit is cleared. ~24 h re-link window.</p>
+      </article>
+      <article class="bento-card">
+        <div class="bento-icon">🟢</div>
+        <h3>Google Find My Device</h3>
+        <p>Service data <code>0xFEAA</code>, frame <code>0x40/0x41</code>. Frame <code>0x41</code> is the cleartext separated state.</p>
+      </article>
+      <article class="bento-card">
+        <div class="bento-icon">🔵</div>
+        <h3>Samsung Galaxy SmartTag</h3>
+        <p>Service data <code>0xFD5A</code>; the state byte flags lost / overmature-lost — the following state.</p>
+      </article>
+      <article class="bento-card">
+        <div class="bento-icon">🟩</div>
+        <h3>Tile</h3>
+        <p>Service data <code>0xFEED / 0xFEEC</code>. No separated signal and a static MAC — always findable, indefinitely.</p>
+      </article>
+      <article class="bento-card bento-lg">
+        <div class="bento-icon">🔗</div>
+        <h3>DULT (unified, emerging)</h3>
+        <p>Service data <code>0xFCB2</code>; the near-owner bit (byte 14 LSB) marks separation. The cross-industry standard the whole ecosystem is converging on — VIGIL parses it today.</p>
+      </article>
+    </div>
+  </div>
+</section>
+
+<!-- ──────────────── HOW IT DECIDES ──────────────── -->
+<section id="decides" class="section reveal">
+  <div class="container">
+    <div class="section-head">
+      <span class="section-tag">how it decides</span>
+      <h2>Persistence, not proximity.</h2>
+      <p class="lead">A tracker is escalated only when it clears the
+      <strong>co-movement test</strong> — the same device, seen at many of
+      <em>your</em> distinct places, over a sustained window, while close enough
+      to actually be on you.</p>
+    </div>
+
+    <div class="bento">
+      <article class="bento-card">
+        <div class="bento-icon">📍</div>
+        <h3>≥ N distinct places</h3>
+        <p>Geohash-7 cells; N = 2 / 3 / 4 by sensitivity. A tracker seen only where you dwell isn't following — it lives there.</p>
+      </article>
+      <article class="bento-card">
+        <div class="bento-icon">⏱</div>
+        <h3>≥ 3 sightings over ≥ T minutes</h3>
+        <p>Debounced to one per 15 min; T = 30 / 45 / 90 by sensitivity. Persistence across time, not a single blip.</p>
+      </article>
+      <article class="bento-card">
+        <div class="bento-icon">📶</div>
+        <h3>RSSI proximity gate</h3>
+        <p>It must have been genuinely close — on-body / in-bag — at least once. This is the piece AirGuard omits; it rejects "a Tile in a passing car."</p>
+      </article>
+    </div>
+
+    <div class="tiers" style="margin-top:2.4rem">
+      <div class="tier tier-green">
+        <div class="tier-name" style="font-size:1.15rem">OBSERVED</div>
+        <p>Seen, logged, geotagged — but hasn't cleared the co-movement test. No alarm.</p>
+      </div>
+      <div class="tier tier-yellow">
+        <div class="tier-name" style="font-size:1.15rem">SUSPICIOUS</div>
+        <p>Co-moving across your places. VIGIL is watching it closely.</p>
+      </div>
+      <div class="tier tier-red">
+        <div class="tier-name" style="font-size:1.15rem">ALERTING</div>
+        <p>Confirmed following you. Surfaced with the "Make it ring" and hot/cold finder tools.</p>
+      </div>
+    </div>
+
+    <div class="feature-split" style="margin-top:2.8rem">
+      <div class="explain-annotations" style="grid-column:1 / -1">
+        <div class="annotation">
+          <span class="anno-num">✓</span>
+          <div>
+            <strong>Allowlist — "This is mine"</strong>
+            <p>Tap a tracker to approve it — your own AirTag, your partner's Tile — and it never alerts again.</p>
+          </div>
+        </div>
+        <div class="annotation">
+          <span class="anno-num">✓</span>
+          <div>
+            <strong>Learned offline baseline</strong>
+            <p>VIGIL learns the places you dwell (home, work) as anchors; a tracker seen at an anchor across several days is auto-marked <strong>Known (home)</strong> — so household tags fall silent on their own, entirely on-device.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ──────────────── CLONES ──────────────── -->
+<section id="clones" class="section section-feature reveal">
+  <div class="container">
+    <div class="section-head">
+      <span class="section-tag">the hard part</span>
+      <h2>Catching the clone.</h2>
+      <p class="lead">
+        Every shipping detector — AirGuard, iOS, Android's built-in — keys on
+        <strong>device identity</strong>. A key-rotating clone (Positive
+        Security's <em>Find You</em>: ~2,000 Find My keys, a new one every 30 s)
+        looks like 2,000 one-off devices and evades them all — it tracked a
+        phone for five days with zero alerts.
+      </p>
+    </div>
+
+    <div class="callout" style="border-color:rgba(239,68,68,.32)">
+      <div class="callout-mark">🎯</div>
+      <div>
+        <h3>Detect the attack, not the device</h3>
+        <p>
+          A rotating clone is <em>one</em> physical radio holding an unbroken,
+          close-range, co-moving RF presence — even as its identity churns
+          thousands of times faster than any standards-compliant tracker is
+          allowed to. VIGIL's <code>PresenceEngine</code> pairs a CUSUM churn
+          trigger with an identity-agnostic presence-track confirmer and the
+          co-movement gate — an "identity-path × churn-path squeeze" that leaves
+          no safe rotation rate. First version implemented and unit-tested
+          against synthetic clone/ambient traces; field-tuning is what remains.
+        </p>
+        <a href="https://github.com/KaraZajac/VIGIL/blob/main/docs/detection-rotation-clone.md" class="audience-link" style="margin-top:.8rem;display:inline-block">Read the algorithm →</a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ──────────────── FINDING + PRIVACY ──────────────── -->
+<section class="section section-bento reveal">
+  <div class="container">
+    <div class="section-head">
+      <span class="section-tag">on-device, private</span>
+      <h2>Fully offline. It only listens.</h2>
+    </div>
+
+    <div class="bento">
+      <article class="bento-card bento-lg">
+        <div class="bento-icon">🔒</div>
+        <h3>No <code>INTERNET</code> permission at all</h3>
+        <p>
+          There is no server, no account, no telemetry. Every tracker, every
+          sighting, and the entire learned baseline live in an on-device SQLite
+          database and <strong>never leave the phone</strong>. Detection is
+          entirely passive — it listens only.
+        </p>
+      </article>
+      <article class="bento-card">
+        <div class="bento-icon">🔔</div>
+        <h3>Make it ring</h3>
+        <p>Tap a suspected tracker to connect over GATT and play its own sound — the DULT-standard way for a victim to locate a hidden AirTag / Find My / Chipolo tag.</p>
+      </article>
+      <article class="bento-card">
+        <div class="bento-icon">🌡</div>
+        <h3>Hot / cold finder</h3>
+        <p>A passive proximity meter — warmer/colder from live signal. Works even on <strong>silent or modified tags that refuse to ring</strong>, which is exactly when you need it.</p>
+      </article>
+    </div>
+  </div>
+</section>
+
+<!-- ──────────────── DOWNLOAD ──────────────── -->
+<section id="download" class="section section-timeline reveal">
+  <div class="container">
+    <div class="section-head">
+      <span class="section-tag">get it</span>
+      <h2>Sideload in three steps.</h2>
+    </div>
+    <div class="timeline dl-steps" style="grid-template-columns:repeat(3,1fr) !important">
+      <div class="tl-col tl-shipped">
+        <div class="tl-tag">1 · download</div>
+        <ul><li>Grab the latest debug-signed APK from <a href="https://github.com/KaraZajac/VIGIL/releases/latest">Releases</a> (currently <strong>v0.1.7</strong>).</li></ul>
+      </div>
+      <div class="tl-col tl-active">
+        <div class="tl-tag">2 · install</div>
+        <ul><li>Sideload — allow "install unknown apps" for your browser or files app, then open the APK.</li></ul>
+      </div>
+      <div class="tl-col tl-next">
+        <div class="tl-tag">3 · grant + scan</div>
+        <ul><li>Grant nearby-devices + location + notifications, pick a sensitivity, and let it run in the background.</li></ul>
+      </div>
+    </div>
+    <p class="tl-foot">
+      Build from source, read the paper, or file issues:
+      <a href="https://github.com/KaraZajac/VIGIL">github.com/KaraZajac/VIGIL</a>
+      ·
+      <a href="https://github.com/KaraZajac/VIGIL/blob/main/paper/vigil.md">the paper</a>
+    </p>
+  </div>
+</section>
+
+<!-- ──────────────── FOOTER ──────────────── -->
+<footer class="footer">
+  <div class="container footer-inner">
+    <div class="footer-col">
+      <div class="footer-brand">
+        <img class="nav-logo" src="logo.svg" width="26" height="26" alt="" aria-hidden="true">
+        VIGIL
+      </div>
+      <p class="footer-tag">
+        Temporal counter-tracking for Android. Fully offline, listens only. A
+        DREAMMAKER project · sibling to OVERWATCH.
+      </p>
+    </div>
+    <div class="footer-col">
+      <h4>Project</h4>
+      <ul>
+        <li><a href="https://github.com/KaraZajac/VIGIL">Source</a></li>
+        <li><a href="https://github.com/KaraZajac/VIGIL/releases">Releases</a></li>
+        <li><a href="https://github.com/KaraZajac/VIGIL/blob/main/paper/vigil.md">The paper</a></li>
+      </ul>
+    </div>
+    <div class="footer-col">
+      <h4>Detects</h4>
+      <ul>
+        <li>Apple Find My / AirTag</li>
+        <li>Google Find My · Tile</li>
+        <li>Samsung SmartTag · DULT</li>
+      </ul>
+    </div>
+    <div class="footer-col">
+      <h4>More</h4>
+      <ul>
+        <li><a href="https://overwatch.netslum.io">OVERWATCH</a></li>
+        <li><a href="https://netslum.io">netslum.io</a></li>
+      </ul>
+    </div>
+  </div>
+  <div class="container footer-bottom">
+    <p>
+      VIGIL is a passive, on-device situational-awareness tool. It does not
+      transmit, probe, or interfere — except the user-initiated "Make it ring".
+    </p>
+    <p class="footer-meta">
+      v0.1.7 · <a href="https://github.com/KaraZajac/VIGIL">github.com/KaraZajac/VIGIL</a>
+    </p>
+  </div>
+</footer>
+
+<script src="app.js" defer></script>
+
+</body>
+</html>
