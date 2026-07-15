@@ -3,6 +3,7 @@ package org.soulstone.vigil.data
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import org.soulstone.vigil.data.db.AlertEntity
 import org.soulstone.vigil.data.db.SightingEntity
 import org.soulstone.vigil.data.db.TrackerEntity
 import org.soulstone.vigil.data.db.VigilDatabase
@@ -11,8 +12,13 @@ import org.soulstone.vigil.detect.CoMovementEvaluator
 import org.soulstone.vigil.model.RiskState
 import org.soulstone.vigil.model.SeparatedState
 import org.soulstone.vigil.model.Sensitivity
+import org.soulstone.vigil.model.TrackerEcosystem
 import org.soulstone.vigil.model.TrackerObservation
 import org.soulstone.vigil.util.Geohash
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+import java.util.TimeZone
 
 /**
  * The temporal core. Persists sightings, maintains the learned baseline, and runs
@@ -133,10 +139,91 @@ class TrackerRepository(private val db: VigilDatabase) {
             lastMac = obs.mac
         )
         db.trackerDao().upsert(updated)
+        if (newlyAlerting) {
+            db.alertDao().insert(
+                AlertEntity(
+                    trackerId = obs.stableId,
+                    ecosystem = obs.ecosystem.name,
+                    label = obs.label,
+                    timestamp = now,
+                    distinctPlaces = assessment.distinctPlaces,
+                    peakRssi = updated.peakRssi,
+                    lat = lat, lon = lon
+                )
+            )
+        }
         RecordResult(updated, newlyAlerting)
+    }
+
+    fun observeAlerts(): Flow<List<AlertEntity>> = db.alertDao().observeAll()
+
+    suspend fun clearAlerts() = db.alertDao().clear()
+
+    /** Human-readable evidence report; null if there are no alerts yet. */
+    suspend fun buildTextReport(): String? {
+        val alerts = db.alertDao().all()
+        if (alerts.isEmpty()) return null
+        val fmt = SimpleDateFormat("yyyy-MM-dd HH:mm:ss z", Locale.US)
+        val sb = StringBuilder()
+        sb.appendLine("VIGIL — tracker evidence report")
+        sb.appendLine("Generated: ${fmt.format(Date())}")
+        sb.appendLine("Times are this phone's local time; locations are approximate (phone GPS).")
+        sb.appendLine("=".repeat(52))
+        for ((trackerId, group) in alerts.groupBy { it.trackerId }) {
+            val head = group.first()
+            sb.appendLine()
+            sb.appendLine("${ecoLabel(head.ecosystem)} — ${head.label}")
+            sb.appendLine("Identity: $trackerId")
+            sb.appendLine("Flagged ${group.size} time(s):")
+            for (a in group) {
+                val where = if (a.lat != null && a.lon != null) "%.5f, %.5f".format(a.lat, a.lon) else "no location"
+                sb.appendLine("  - ${fmt.format(Date(a.timestamp))} : ${a.distinctPlaces} places, peak ${a.peakRssi} dBm, at $where")
+            }
+            val geo = db.sightingDao().allFor(trackerId).filter { it.lat != null && it.lon != null }
+            if (geo.isNotEmpty()) {
+                sb.appendLine("  Seen with you at ${geo.size} location(s):")
+                for (s in geo) {
+                    sb.appendLine("    ${fmt.format(Date(s.timestamp))}  ${"%.5f, %.5f".format(s.lat, s.lon)}  ${s.rssi} dBm")
+                }
+            }
+        }
+        sb.appendLine()
+        sb.appendLine("=".repeat(52))
+        sb.appendLine("Recorded by VIGIL, an offline anti-tracking app — a log of Bluetooth trackers detected moving with this phone.")
+        return sb.toString()
+    }
+
+    /** GPX of every geotagged sighting, to open in a maps app. */
+    suspend fun buildGpx(): String {
+        val fmt = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).apply {
+            timeZone = TimeZone.getTimeZone("UTC")
+        }
+        val sb = StringBuilder()
+        sb.appendLine("""<?xml version="1.0" encoding="UTF-8"?>""")
+        sb.appendLine("""<gpx version="1.1" creator="VIGIL" xmlns="http://www.topografix.com/GPX/1/1">""")
+        for (s in db.sightingDao().allGeotagged()) {
+            sb.appendLine("""  <wpt lat="${s.lat}" lon="${s.lon}">""")
+            sb.appendLine("    <time>${fmt.format(Date(s.timestamp))}</time>")
+            sb.appendLine("    <name>${trackerShortName(s.trackerId)} ${s.rssi}dBm</name>")
+            sb.appendLine("  </wpt>")
+        }
+        sb.appendLine("</gpx>")
+        return sb.toString()
     }
 
     companion object {
         const val RETENTION_DAYS = 14
     }
+}
+
+private fun ecoLabel(name: String): String =
+    runCatching { TrackerEcosystem.valueOf(name).display }.getOrDefault(name)
+
+private fun trackerShortName(stableId: String): String = when (stableId.substringBefore(':')) {
+    "apple" -> "AppleFindMy"
+    "fmdn" -> "GoogleFMD"
+    "samsung" -> "SmartTag"
+    "tile" -> "Tile"
+    "dult" -> "DULT"
+    else -> "Tracker"
 }

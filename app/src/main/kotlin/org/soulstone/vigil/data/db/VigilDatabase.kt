@@ -68,6 +68,21 @@ data class PlaceEntity(
     val anchor: Boolean = false
 )
 
+/** A recorded alert — when a tracker first crossed into ALERTING. Kept for the
+ *  history list and the evidence export. */
+@Entity(tableName = "alerts")
+data class AlertEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val trackerId: String,
+    val ecosystem: String,
+    val label: String,
+    val timestamp: Long,
+    val distinctPlaces: Int,
+    val peakRssi: Int,
+    val lat: Double? = null,
+    val lon: Double? = null
+)
+
 @Dao
 interface TrackerDao {
     @Query("SELECT * FROM trackers WHERE stableId = :id")
@@ -104,6 +119,12 @@ interface SightingDao {
     @Query("SELECT * FROM sightings WHERE trackerId = :id AND timestamp >= :since ORDER BY timestamp")
     suspend fun recentFor(id: String, since: Long): List<SightingEntity>
 
+    @Query("SELECT * FROM sightings WHERE trackerId = :id ORDER BY timestamp")
+    suspend fun allFor(id: String): List<SightingEntity>
+
+    @Query("SELECT * FROM sightings WHERE lat IS NOT NULL ORDER BY timestamp")
+    suspend fun allGeotagged(): List<SightingEntity>
+
     @Query("DELETE FROM sightings WHERE timestamp < :cutoff")
     suspend fun prune(cutoff: Long)
 
@@ -120,15 +141,31 @@ interface PlaceDao {
     suspend fun upsert(place: PlaceEntity)
 }
 
+@Dao
+interface AlertDao {
+    @Insert
+    suspend fun insert(alert: AlertEntity)
+
+    @Query("SELECT * FROM alerts ORDER BY timestamp DESC")
+    fun observeAll(): Flow<List<AlertEntity>>
+
+    @Query("SELECT * FROM alerts ORDER BY timestamp DESC")
+    suspend fun all(): List<AlertEntity>
+
+    @Query("DELETE FROM alerts")
+    suspend fun clear()
+}
+
 @Database(
-    entities = [TrackerEntity::class, SightingEntity::class, PlaceEntity::class],
-    version = 3,
+    entities = [TrackerEntity::class, SightingEntity::class, PlaceEntity::class, AlertEntity::class],
+    version = 4,
     exportSchema = false
 )
 abstract class VigilDatabase : RoomDatabase() {
     abstract fun trackerDao(): TrackerDao
     abstract fun sightingDao(): SightingDao
     abstract fun placeDao(): PlaceDao
+    abstract fun alertDao(): AlertDao
 
     companion object {
         @Volatile private var INSTANCE: VigilDatabase? = null

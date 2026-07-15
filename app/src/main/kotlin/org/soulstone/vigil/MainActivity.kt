@@ -17,14 +17,17 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.core.content.ContextCompat
+import androidx.core.content.FileProvider
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.launch
+import java.io.File
 import org.soulstone.vigil.data.TrackerRepository
 import org.soulstone.vigil.data.db.TrackerEntity
 import org.soulstone.vigil.data.db.VigilDatabase
 import org.soulstone.vigil.ring.TrackerRinger
 import org.soulstone.vigil.data.settings.Settings
 import org.soulstone.vigil.service.ScanService
+import org.soulstone.vigil.ui.HistoryScreen
 import org.soulstone.vigil.ui.MainScreen
 import org.soulstone.vigil.ui.OnboardingScreen
 import org.soulstone.vigil.ui.SafetyScreen
@@ -74,12 +77,22 @@ class MainActivity : ComponentActivity() {
             VigilTheme {
                 val onboarded by settings.onboarded.collectAsState()
                 var showSafety by remember { mutableStateOf(false) }
+                var showHistory by remember { mutableStateOf(false) }
                 when {
                     !onboarded -> OnboardingScreen(onFinish = {
                         settings.setOnboarded(true)
                         if (!hasEssentialPermissions()) permissionLauncher.launch(requiredPermissions)
                     })
                     showSafety -> SafetyScreen(onBack = { showSafety = false })
+                    showHistory -> {
+                        val alerts by repo.observeAlerts().collectAsState(initial = emptyList())
+                        HistoryScreen(
+                            alerts = alerts,
+                            onExport = { exportEvidence() },
+                            onClear = { lifecycleScope.launch { repo.clearAlerts() } },
+                            onBack = { showHistory = false }
+                        )
+                    }
                     else -> {
                         val running by ScanService.running.collectAsState()
                         val trackers by repo.observeTrackers().collectAsState(initial = emptyList())
@@ -110,7 +123,8 @@ class MainActivity : ComponentActivity() {
                             },
                             onRing = { tracker -> ringTracker(tracker) },
                             onClearAll = { lifecycleScope.launch { repo.clearAll() } },
-                            onOpenSafety = { showSafety = true }
+                            onOpenSafety = { showSafety = true },
+                            onOpenHistory = { showHistory = true }
                         )
                     }
                 }
@@ -132,6 +146,34 @@ class MainActivity : ComponentActivity() {
         lifecycleScope.launch {
             val msg = TrackerRinger.ring(this@MainActivity, tracker.lastMac, tracker.ecosystem)
             Toast.makeText(this@MainActivity, msg, Toast.LENGTH_LONG).show()
+        }
+    }
+
+    private fun exportEvidence() {
+        lifecycleScope.launch {
+            val report = repo.buildTextReport()
+            if (report == null) {
+                Toast.makeText(this@MainActivity, "No alerts to export yet.", Toast.LENGTH_SHORT).show()
+                return@launch
+            }
+            runCatching {
+                val dir = File(cacheDir, "exports").apply { mkdirs() }
+                val txt = File(dir, "vigil-report.txt").apply { writeText(report) }
+                val gpx = File(dir, "vigil-track.gpx").apply { writeText(repo.buildGpx()) }
+                val auth = "$packageName.fileprovider"
+                val uris = arrayListOf(
+                    FileProvider.getUriForFile(this@MainActivity, auth, txt),
+                    FileProvider.getUriForFile(this@MainActivity, auth, gpx)
+                )
+                val share = Intent(Intent.ACTION_SEND_MULTIPLE).apply {
+                    type = "*/*"
+                    putParcelableArrayListExtra(Intent.EXTRA_STREAM, uris)
+                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                }
+                startActivity(Intent.createChooser(share, "Export VIGIL evidence"))
+            }.onFailure {
+                Toast.makeText(this@MainActivity, "Export failed: ${it.message}", Toast.LENGTH_LONG).show()
+            }
         }
     }
 

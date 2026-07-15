@@ -33,6 +33,7 @@ import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.GppMaybe
 import androidx.compose.material.icons.filled.HealthAndSafety
+import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Radar
 import androidx.compose.material.icons.filled.Shield
@@ -92,7 +93,8 @@ fun MainScreen(
     onDistrust: (String) -> Unit,
     onRing: (TrackerEntity) -> Unit,
     onClearAll: () -> Unit,
-    onOpenSafety: () -> Unit
+    onOpenSafety: () -> Unit,
+    onOpenHistory: () -> Unit
 ) {
     var detail by remember { mutableStateOf<TrackerEntity?>(null) }
     var finding by remember { mutableStateOf<TrackerEntity?>(null) }
@@ -121,6 +123,13 @@ fun MainScreen(
                     }
                 },
                 actions = {
+                    IconButton(onClick = onOpenHistory) {
+                        Icon(
+                            Icons.Filled.History,
+                            contentDescription = "Alert history",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
                     IconButton(onClick = onOpenSafety) {
                         Icon(
                             Icons.Filled.HealthAndSafety,
