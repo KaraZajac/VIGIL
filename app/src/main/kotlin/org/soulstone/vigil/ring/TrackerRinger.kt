@@ -6,6 +6,7 @@ import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothGatt
 import android.bluetooth.BluetoothGattCallback
 import android.bluetooth.BluetoothGattCharacteristic
+import android.bluetooth.BluetoothGattDescriptor
 import android.bluetooth.BluetoothManager
 import android.bluetooth.BluetoothProfile
 import android.content.Context
@@ -16,33 +17,62 @@ import androidx.core.content.ContextCompat
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withTimeout
+import org.soulstone.vigil.model.TrackerEcosystem
 import java.util.UUID
 import kotlin.coroutines.resume
 
 /**
  * User-initiated "make it ring" over BLE GATT — VIGIL's ONE active operation
  * (detection stays fully passive). Connects to a separated tracker and writes the
- * DULT play-sound command, then disconnects.
+ * play-sound command, then disconnects. No pairing/bonding is used (non-owner sound
+ * needs none), matching AirGuard.
  *
- * The cross-vendor DULT path covers Google Find My Device network tags and DULT
- * partners (Chipolo/Pebblebee/eufy/Motorola). Apple AirTags use Apple's own sound
- * service and will report "no remote-ring service" until that per-ecosystem path is
- * added. The UUIDs/opcode below are from the DULT draft and are pending on-device
- * verification.
+ * Protocols (from AirGuard's AppleFindMy.kt + the IETF DULT draft, tried in order by
+ * whichever service the tag exposes):
+ *  - AirTag native: write a single 0xAF byte, no CCCD; the tag rings and self-disconnects.
+ *  - DULT (Google FMDN + Chipolo/Pebblebee/eufy/Motorola): enable indications, write 0x0300.
+ *  - Find My legacy (fd44): enable notifications, write [0x01,0x00,0x03].
+ * Samsung SmartTag and Tile expose NO non-owner ring — the app tells the user to use
+ * the vendor app instead.
  */
 object TrackerRinger {
 
     private const val TAG = "TrackerRinger"
     private const val TIMEOUT_MS = 15_000L
+    private const val STATUS_PEER_DISCONNECT = 19  // GATT_CONN_TERMINATE_PEER_USER — AirTag "done ringing"
 
-    // DULT accessory-protocol non-owner sound (IETF draft). VERIFY on-device.
-    private val DULT_SERVICE = UUID.fromString("15190001-12F4-C226-88ED-2AC5579F2A85")
-    private val DULT_NON_OWNER_CHAR = UUID.fromString("8E0C0001-1D68-FB92-BF61-48377421680E")
-    private val DULT_SOUND_START = byteArrayOf(0x00, 0x03) // opcode 0x0300 (verify endianness/format)
+    private data class Proto(
+        val name: String,
+        val service: UUID,
+        val characteristic: UUID,
+        val start: ByteArray,
+        val cccd: Boolean,
+        val indicate: Boolean
+    )
 
-    /** Returns a short user-facing status message. [ecosystem] is retained for the
-     *  per-ecosystem paths (e.g. Apple) still to be added. */
+    private val AIRTAG = Proto(
+        "AirTag", uuid("7DFC9000-7D1C-4951-86AA-8D9728F8D66C"),
+        uuid("7DFC9001-7D1C-4951-86AA-8D9728F8D66C"), byteArrayOf(0xAF.toByte()), cccd = false, indicate = false
+    )
+    private val DULT = Proto(
+        "DULT", uuid("15190001-12F4-C226-88ED-2AC5579F2A85"),
+        uuid("8E0C0001-1D68-FB92-BF61-48377421680E"), byteArrayOf(0x00, 0x03), cccd = true, indicate = true
+    )
+    private val FINDMY = Proto(
+        "FindMy", uuid("0000FD44-0000-1000-8000-00805F9B34FB"),
+        uuid("4F860003-943B-49EF-BED4-2F730304427A"), byteArrayOf(0x01, 0x00, 0x03), cccd = true, indicate = false
+    )
+    private val PRIORITY = listOf(AIRTAG, DULT, FINDMY)
+    private val CCCD = uuid("00002902-0000-1000-8000-00805F9B34FB")
+
     suspend fun ring(context: Context, mac: String, ecosystem: String): String {
+        when (runCatching { TrackerEcosystem.valueOf(ecosystem) }.getOrNull()) {
+            TrackerEcosystem.SAMSUNG_SMARTTAG ->
+                return "Samsung SmartTags can only be rung from the SmartThings app (owner-only)."
+            TrackerEcosystem.TILE ->
+                return "Tiles can only be rung from the Tile app (owner-only)."
+            else -> {}
+        }
         if (mac.isBlank()) return "No recent address for this tracker — keep watching and try again."
         if (!hasConnectPermission(context)) return "Grant Bluetooth (Connect) to ring trackers."
         val adapter = (context.getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager)?.adapter
@@ -67,40 +97,61 @@ object TrackerRinger {
     private suspend fun attemptRing(context: Context, device: BluetoothDevice): String =
         suspendCancellableCoroutine { cont ->
             var gatt: BluetoothGatt? = null
+            var selected: Proto? = null
+            fun done(msg: String, g: BluetoothGatt) {
+                if (cont.isActive) cont.resume(msg)
+                g.disconnect()
+            }
             val callback = object : BluetoothGattCallback() {
                 override fun onConnectionStateChange(g: BluetoothGatt, status: Int, newState: Int) {
                     when (newState) {
                         BluetoothProfile.STATE_CONNECTED -> g.discoverServices()
                         BluetoothProfile.STATE_DISCONNECTED -> {
-                            if (cont.isActive) cont.resume("Tracker disconnected before it could ring.")
+                            // An AirTag self-disconnects (status 19) once it has started ringing.
+                            if (cont.isActive) {
+                                if (selected == AIRTAG && status == STATUS_PEER_DISCONNECT)
+                                    cont.resume("Ringing… listen for the AirTag.")
+                                else cont.resume("Tracker disconnected before it could ring.")
+                            }
                             g.close()
                         }
                     }
                 }
 
                 override fun onServicesDiscovered(g: BluetoothGatt, status: Int) {
-                    val ch = g.getService(DULT_SERVICE)?.getCharacteristic(DULT_NON_OWNER_CHAR)
-                    if (ch == null) {
-                        if (cont.isActive) cont.resume("This tracker type doesn't expose a remote-ring service.")
-                        g.disconnect()
-                        return
-                    }
-                    if (!writeSound(g, ch) && cont.isActive) {
-                        cont.resume("Couldn't send the ring command.")
-                        g.disconnect()
+                    val proto = PRIORITY.firstOrNull { g.getService(it.service) != null }
+                        ?: return done("This tracker type doesn't expose a remote-ring service.", g)
+                    val ch = g.getService(proto.service)?.getCharacteristic(proto.characteristic)
+                        ?: return done("Ring characteristic missing on this tracker.", g)
+                    selected = proto
+                    if (proto.cccd) {
+                        g.setCharacteristicNotification(ch, true)
+                        val desc = ch.getDescriptor(CCCD)
+                        val v = if (proto.indicate) BluetoothGattDescriptor.ENABLE_INDICATION_VALUE
+                        else BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
+                        if (desc == null || !writeDescriptor(g, desc, v)) writeStart(g, ch, proto)
+                    } else {
+                        if (!writeStart(g, ch, proto)) done("Couldn't send the ring command.", g)
                     }
                 }
 
-                override fun onCharacteristicWrite(
-                    g: BluetoothGatt,
-                    ch: BluetoothGattCharacteristic,
-                    status: Int
-                ) {
-                    if (cont.isActive) cont.resume(
-                        if (status == BluetoothGatt.GATT_SUCCESS) "Ringing… listen for the tracker."
-                        else "The tracker refused the ring command."
-                    )
-                    g.disconnect()
+                override fun onDescriptorWrite(g: BluetoothGatt, desc: BluetoothGattDescriptor, status: Int) {
+                    val proto = selected ?: return
+                    val ch = g.getService(proto.service)?.getCharacteristic(proto.characteristic)
+                        ?: return done("Ring characteristic missing on this tracker.", g)
+                    if (!writeStart(g, ch, proto)) done("Couldn't send the ring command.", g)
+                }
+
+                override fun onCharacteristicWrite(g: BluetoothGatt, ch: BluetoothGattCharacteristic, status: Int) {
+                    // AirTag reports via self-disconnect; others confirm here.
+                    if (selected == AIRTAG) {
+                        done("Ringing… listen for the AirTag.", g)
+                    } else {
+                        done(
+                            if (status == BluetoothGatt.GATT_SUCCESS) "Ringing… listen for the tracker."
+                            else "The tracker refused the ring command.", g
+                        )
+                    }
                 }
             }
             gatt = device.connectGatt(context, false, callback, BluetoothDevice.TRANSPORT_LE)
@@ -109,14 +160,24 @@ object TrackerRinger {
 
     @Suppress("DEPRECATION")
     @SuppressLint("MissingPermission")
-    private fun writeSound(g: BluetoothGatt, ch: BluetoothGattCharacteristic): Boolean =
+    private fun writeStart(g: BluetoothGatt, ch: BluetoothGattCharacteristic, proto: Proto): Boolean =
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            g.writeCharacteristic(ch, DULT_SOUND_START, BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT) ==
+            g.writeCharacteristic(ch, proto.start, BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT) ==
                 BluetoothGatt.GATT_SUCCESS
         } else {
             ch.writeType = BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
-            ch.value = DULT_SOUND_START
+            ch.value = proto.start
             g.writeCharacteristic(ch)
+        }
+
+    @Suppress("DEPRECATION")
+    @SuppressLint("MissingPermission")
+    private fun writeDescriptor(g: BluetoothGatt, desc: BluetoothGattDescriptor, value: ByteArray): Boolean =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            g.writeDescriptor(desc, value) == BluetoothGatt.GATT_SUCCESS
+        } else {
+            desc.value = value
+            g.writeDescriptor(desc)
         }
 
     private fun hasConnectPermission(context: Context): Boolean =
@@ -124,4 +185,6 @@ object TrackerRinger {
             ContextCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_CONNECT) ==
                 PackageManager.PERMISSION_GRANTED
         } else true
+
+    private fun uuid(s: String): UUID = UUID.fromString(s)
 }
