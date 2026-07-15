@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <!-- BLE scanning (Android 12+). NOTE: unlike OVERWATCH we deliberately do
+         NOT set usesPermissionFlags="neverForLocation" — VIGIL correlates each
+         detection with a GPS fix to reason about co-movement, and that flag
+         both forbids deriving location AND silently filters beacon-shaped
+         advertisements from scan results (the exact payloads we parse). -->
+    <uses-permission android:name="android.permission.BLUETOOTH_SCAN" />
+    <!-- Only used later to GATT-connect to a suspect tag for Play-Sound / Get-Identifier (DULT). -->
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+
+    <!-- BLE legacy (Android 11 and below) -->
+    <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
+    <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30" />
+
+    <!-- Location — required for scan results pre-S and to geotag sightings for
+         the temporal co-movement engine. Background variant lets the scan keep
+         tagging locations with the screen off (paired with the FGS). -->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
+
+    <!-- Foreground service so scanning + location tagging survive the screen
+         being off. connectedDevice covers BLE; location covers the GPS tagging. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <!-- Alert the user on a confirmed follower -->
+    <uses-permission android:name="android.permission.VIBRATE" />
+
+    <!-- Keep scanning across reboots is opt-in and added later; not requested yet. -->
+
+    <!-- PRIVACY: VIGIL requests NO INTERNET permission. Everything — the tracker
+         database, the learned baseline, the co-movement engine — runs and stays
+         on-device. There is no server and no telemetry. -->
+
+    <uses-feature android:name="android.hardware.bluetooth_le" android:required="true" />
+
+    <application
+        android:allowBackup="false"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:fullBackupContent="@xml/backup_rules"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.Vigil"
+        tools:targetApi="34">
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:launchMode="singleTask"
+            android:theme="@style/Theme.Vigil">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <service
+            android:name=".service.ScanService"
+            android:enabled="true"
+            android:exported="false"
+            android:foregroundServiceType="connectedDevice|location" />
+    </application>
+</manifest>

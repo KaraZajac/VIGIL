@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">VIGIL</string>
+    <string name="notification_channel_name">Tracker watch</string>
+    <string name="notification_channel_desc">Ongoing scan for personal trackers following you</string>
+    <string name="notification_text">Watching for trackers moving with you…</string>
+</resources>
