@@ -61,6 +61,16 @@ class ScanService : LifecycleService() {
         private val _running = MutableStateFlow(false)
         val running: StateFlow<Boolean> = _running.asStateFlow()
 
+        // Live RSSI stream for the "find it" hot/cold screen. The UI sets a target
+        // stableId; every matching advert (not the throttled DB path) updates this.
+        @Volatile private var finderTarget: String? = null
+        private val _finderRssi = MutableStateFlow<Int?>(null)
+        val finderRssi: StateFlow<Int?> = _finderRssi.asStateFlow()
+        fun setFinderTarget(id: String?) {
+            finderTarget = id
+            _finderRssi.value = null
+        }
+
         fun start(context: Context) {
             val intent = Intent(context, ScanService::class.java).apply { action = ACTION_START }
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -125,6 +135,9 @@ class ScanService : LifecycleService() {
 
     private fun onObservation(obs: TrackerObservation) {
         val fix = location.location.value
+
+        // Live RSSI for the "find it" screen — every advert, ahead of any throttle.
+        if (obs.stableId == finderTarget) _finderRssi.value = obs.rssi
 
         // Rotation-clone presence engine (problem #1) — fed synchronously so its
         // streaming state stays ordered. Only a CONFIRMED verdict raises a user

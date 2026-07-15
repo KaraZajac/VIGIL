@@ -122,7 +122,8 @@ class TrackerRepository(private val db: VigilDatabase) {
             lastRssi = obs.rssi,
             peakRssi = maxOf(existing?.peakRssi ?: -127, obs.rssi),
             distinctPlaces = assessment.distinctPlaces,
-            effectiveSightings = assessment.sightings
+            effectiveSightings = assessment.sightings,
+            lastMac = obs.mac
         )
         db.trackerDao().upsert(updated)
         RecordResult(updated, newlyAlerting)

@@ -7,6 +7,7 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.provider.Settings as AndroidSettings
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
@@ -17,7 +18,9 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.launch
 import org.soulstone.vigil.data.TrackerRepository
+import org.soulstone.vigil.data.db.TrackerEntity
 import org.soulstone.vigil.data.db.VigilDatabase
+import org.soulstone.vigil.ring.TrackerRinger
 import org.soulstone.vigil.data.settings.Settings
 import org.soulstone.vigil.service.ScanService
 import org.soulstone.vigil.ui.MainScreen
@@ -91,7 +94,8 @@ class MainActivity : ComponentActivity() {
                     },
                     onDistrust = { id ->
                         lifecycleScope.launch { repo.clearBaseline(id) }
-                    }
+                    },
+                    onRing = { tracker -> ringTracker(tracker) }
                 )
             }
         }
@@ -105,6 +109,14 @@ class MainActivity : ComponentActivity() {
     private fun hasEssentialPermissions(): Boolean = requiredPermissions
         .filter { it != Manifest.permission.POST_NOTIFICATIONS }
         .all { ContextCompat.checkSelfPermission(this, it) == PackageManager.PERMISSION_GRANTED }
+
+    private fun ringTracker(tracker: TrackerEntity) {
+        Toast.makeText(this, "Trying to ring ${tracker.label}…", Toast.LENGTH_SHORT).show()
+        lifecycleScope.launch {
+            val msg = TrackerRinger.ring(this@MainActivity, tracker.lastMac, tracker.ecosystem)
+            Toast.makeText(this@MainActivity, msg, Toast.LENGTH_LONG).show()
+        }
+    }
 
     @Suppress("unused")
     private fun openAppSettings() {

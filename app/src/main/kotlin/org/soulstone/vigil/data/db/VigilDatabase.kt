@@ -37,7 +37,9 @@ data class TrackerEntity(
     val lastRssi: Int = 0,
     val peakRssi: Int = -127,
     val distinctPlaces: Int = 0,
-    val effectiveSightings: Int = 0
+    val effectiveSightings: Int = 0,
+    // last-seen BLE MAC — needed to GATT-connect for "make it ring"
+    val lastMac: String = ""
 )
 
 /** One sighting of a tracker at one instant, geotagged when a fix is available. */
@@ -114,7 +116,7 @@ interface PlaceDao {
 
 @Database(
     entities = [TrackerEntity::class, SightingEntity::class, PlaceEntity::class],
-    version = 2,
+    version = 3,
     exportSchema = false
 )
 abstract class VigilDatabase : RoomDatabase() {

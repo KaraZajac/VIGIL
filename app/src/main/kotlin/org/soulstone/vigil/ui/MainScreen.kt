@@ -1,6 +1,14 @@
 package org.soulstone.vigil.ui
 
 import android.text.format.DateUtils
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material.icons.filled.NotificationsActive
+import androidx.compose.material.icons.filled.Sensors
+import androidx.compose.material3.FilledTonalButton
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.ui.graphics.lerp
+import org.soulstone.vigil.service.ScanService
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -73,9 +81,11 @@ fun MainScreen(
     onStartStop: () -> Unit,
     onSetSensitivity: (Sensitivity) -> Unit,
     onApprove: (String, Boolean) -> Unit,
-    onDistrust: (String) -> Unit
+    onDistrust: (String) -> Unit,
+    onRing: (TrackerEntity) -> Unit
 ) {
     var detail by remember { mutableStateOf<TrackerEntity?>(null) }
+    var finding by remember { mutableStateOf<TrackerEntity?>(null) }
 
     val now = System.currentTimeMillis()
     val active = trackers
@@ -195,9 +205,19 @@ fun MainScreen(
             TrackerDetail(
                 t,
                 onApprove = { id, a -> onApprove(id, a); detail = null },
-                onDistrust = { id -> onDistrust(id); detail = null }
+                onDistrust = { id -> onDistrust(id); detail = null },
+                onFind = { dev -> ScanService.setFinderTarget(dev.stableId); finding = dev; detail = null },
+                onRing = onRing
             )
         }
+    }
+
+    finding?.let { dev ->
+        FinderScreen(
+            dev,
+            onRing = onRing,
+            onClose = { ScanService.setFinderTarget(null); finding = null }
+        )
     }
 }
 
@@ -335,7 +355,9 @@ private fun TrackerCard(
 private fun TrackerDetail(
     t: TrackerEntity,
     onApprove: (String, Boolean) -> Unit,
-    onDistrust: (String) -> Unit
+    onDistrust: (String) -> Unit,
+    onFind: (TrackerEntity) -> Unit,
+    onRing: (TrackerEntity) -> Unit
 ) {
     val status = statusOf(t)
     Column(Modifier.fillMaxWidth().padding(24.dp)) {
@@ -366,6 +388,19 @@ private fun TrackerDetail(
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
         Spacer(Modifier.height(20.dp))
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            FilledTonalButton(onClick = { onFind(t) }, modifier = Modifier.weight(1f)) {
+                Icon(Icons.Filled.Sensors, null, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.size(6.dp))
+                Text("Find it")
+            }
+            FilledTonalButton(onClick = { onRing(t) }, modifier = Modifier.weight(1f)) {
+                Icon(Icons.Filled.NotificationsActive, null, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.size(6.dp))
+                Text("Ring it")
+            }
+        }
+        Spacer(Modifier.height(12.dp))
         when (status) {
             TrackerStatus.SAFE_APPROVED ->
                 Button(onClick = { onApprove(t.stableId, false) }, modifier = Modifier.fillMaxWidth()) {
@@ -389,6 +424,78 @@ private fun DetailRow(label: String, value: String) {
     Row(Modifier.fillMaxWidth().padding(vertical = 6.dp), horizontalArrangement = Arrangement.SpaceBetween) {
         Text(label, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium)
         Text(value, fontWeight = FontWeight.Medium, style = MaterialTheme.typography.bodyMedium)
+    }
+}
+
+/** Passive hot/cold finder — smoothed live RSSI as a growing, colour-shifting
+ *  proximity meter. Works even on silent/modified tags that refuse to ring. */
+@Composable
+private fun FinderScreen(t: TrackerEntity, onRing: (TrackerEntity) -> Unit, onClose: () -> Unit) {
+    val rssi by ScanService.finderRssi.collectAsState()
+    val smoothed = remember { mutableStateOf(-100f) }
+    LaunchedEffect(rssi) { rssi?.let { smoothed.value = 0.35f * it + 0.65f * smoothed.value } }
+    val hasSignal = rssi != null
+    val p = ((smoothed.value + 100f) / 60f).coerceIn(0f, 1f)  // -100 dBm..-40 dBm -> 0..1
+    val label = when {
+        !hasSignal -> "Searching… walk around"
+        p > 0.8f -> "Right here"
+        p > 0.6f -> "Very close"
+        p > 0.4f -> "Close"
+        p > 0.2f -> "Getting warmer"
+        else -> "Far"
+    }
+    val color = lerp(VigilRed, VigilGreen, p)
+
+    Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+        Column(
+            Modifier.fillMaxSize().padding(24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
+            Text(
+                ecosystemDisplay(t.ecosystem),
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold
+            )
+            Spacer(Modifier.height(32.dp))
+            Box(
+                Modifier.size((120 + p * 160).dp).clip(CircleShape).background(
+                    if (hasSignal) color.copy(alpha = 0.25f) else MaterialTheme.colorScheme.surfaceVariant
+                ),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    Icons.Filled.Sensors, null,
+                    tint = if (hasSignal) color else MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(64.dp)
+                )
+            }
+            Spacer(Modifier.height(32.dp))
+            Text(
+                label,
+                style = MaterialTheme.typography.headlineSmall,
+                fontWeight = FontWeight.Bold,
+                color = if (hasSignal) color else MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Text(
+                if (hasSignal) "$rssi dBm" else "no signal yet",
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(Modifier.height(40.dp))
+            Button(onClick = { onRing(t) }, modifier = Modifier.fillMaxWidth().height(52.dp)) {
+                Icon(Icons.Filled.NotificationsActive, null)
+                Spacer(Modifier.size(8.dp))
+                Text("Make it ring")
+            }
+            Spacer(Modifier.height(8.dp))
+            TextButton(onClick = onClose, modifier = Modifier.fillMaxWidth()) { Text("Done") }
+            Spacer(Modifier.height(12.dp))
+            Text(
+                "If it won't ring, it may be a silent or modified tracker — use the signal above to home in on it.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
     }
 }
 
