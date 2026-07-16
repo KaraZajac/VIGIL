@@ -37,3 +37,6 @@ enum class TrackerStatus { SAFE_APPROVED, SAFE_BASELINE, OBSERVED, SUSPICIOUS, A
 
 /** Detection sensitivity — trades time-to-alert against false positives. */
 enum class Sensitivity { HIGH, MEDIUM, LOW }
+
+/** A geotagged point where a tracker was seen, for the in-app co-movement trail. */
+data class TrailPoint(val lat: Double, val lon: Double)

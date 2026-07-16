@@ -14,6 +14,7 @@ import org.soulstone.vigil.model.SeparatedState
 import org.soulstone.vigil.model.Sensitivity
 import org.soulstone.vigil.model.TrackerEcosystem
 import org.soulstone.vigil.model.TrackerObservation
+import org.soulstone.vigil.model.TrailPoint
 import org.soulstone.vigil.util.Geohash
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -158,6 +159,13 @@ class TrackerRepository(private val db: VigilDatabase) {
     fun observeAlerts(): Flow<List<AlertEntity>> = db.alertDao().observeAll()
 
     suspend fun clearAlerts() = db.alertDao().clear()
+
+    /** Geotagged sightings of one tracker, in time order, for the in-app trail. */
+    suspend fun trailFor(id: String): List<TrailPoint> =
+        db.sightingDao().allFor(id).mapNotNull { s ->
+            val la = s.lat; val lo = s.lon
+            if (la != null && lo != null) TrailPoint(la, lo) else null
+        }
 
     /** Human-readable evidence report; null if there are no alerts yet. */
     suspend fun buildTextReport(): String? {

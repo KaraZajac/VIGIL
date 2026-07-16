@@ -12,6 +12,7 @@ import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.res.painterResource
 import org.soulstone.vigil.service.ScanService
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -60,11 +61,13 @@ import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
@@ -76,6 +79,7 @@ import org.soulstone.vigil.model.Sensitivity
 import org.soulstone.vigil.model.TrackerEcosystem
 import org.soulstone.vigil.R
 import org.soulstone.vigil.model.TrackerStatus
+import org.soulstone.vigil.model.TrailPoint
 import org.soulstone.vigil.ui.theme.VigilGreen
 import org.soulstone.vigil.ui.theme.VigilPeach
 import org.soulstone.vigil.ui.theme.VigilRed
@@ -94,7 +98,8 @@ fun MainScreen(
     onRing: (TrackerEntity) -> Unit,
     onClearAll: () -> Unit,
     onOpenSafety: () -> Unit,
-    onOpenHistory: () -> Unit
+    onOpenHistory: () -> Unit,
+    loadTrail: suspend (String) -> List<TrailPoint>
 ) {
     var detail by remember { mutableStateOf<TrackerEntity?>(null) }
     var finding by remember { mutableStateOf<TrackerEntity?>(null) }
@@ -247,7 +252,8 @@ fun MainScreen(
                 onDistrust = { id -> onDistrust(id); detail = null },
                 onFind = { dev -> ScanService.setFinderTarget(dev.stableId); finding = dev; detail = null },
                 onRing = onRing,
-                onSafety = { onOpenSafety(); detail = null }
+                onSafety = { onOpenSafety(); detail = null },
+                loadTrail = loadTrail
             )
         }
     }
@@ -398,7 +404,8 @@ private fun TrackerDetail(
     onDistrust: (String) -> Unit,
     onFind: (TrackerEntity) -> Unit,
     onRing: (TrackerEntity) -> Unit,
-    onSafety: () -> Unit
+    onSafety: () -> Unit,
+    loadTrail: suspend (String) -> List<TrailPoint>
 ) {
     val status = statusOf(t)
     Column(Modifier.fillMaxWidth().padding(24.dp)) {
@@ -440,6 +447,25 @@ private fun TrackerDetail(
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
+
+        val trail by produceState(initialValue = emptyList<TrailPoint>(), t.stableId) { value = loadTrail(t.stableId) }
+        if (trail.size >= 2) {
+            Spacer(Modifier.height(18.dp))
+            Text("Where it's moved with you", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
+            Spacer(Modifier.height(8.dp))
+            TrailView(
+                trail,
+                Modifier.fillMaxWidth().height(150.dp).clip(RoundedCornerShape(12.dp))
+                    .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+            )
+            Text(
+                "A schematic of the ${trail.size} points it was seen — not a real map. Use Export for that.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 6.dp)
+            )
+        }
+
         Spacer(Modifier.height(20.dp))
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             FilledTonalButton(onClick = { onFind(t) }, modifier = Modifier.weight(1f)) {
@@ -550,6 +576,38 @@ private fun FinderScreen(t: TrackerEntity, onRing: (TrackerEntity) -> Unit, onCl
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
+        }
+    }
+}
+
+/** Offline schematic of a tracker's geotagged sightings — points + path, scaled
+ *  to fit. Not a real map (VIGIL has no network); the GPX export opens in one. */
+@Composable
+private fun TrailView(points: List<TrailPoint>, modifier: Modifier = Modifier) {
+    val line = Color(0xFF89B4FA)
+    val startC = Color(0xFFA6E3A1)
+    val endC = Color(0xFFFAB387)
+    Canvas(modifier) {
+        if (points.size < 2) return@Canvas
+        val pad = 18f
+        val minLat = points.minOf { it.lat }; val maxLat = points.maxOf { it.lat }
+        val minLon = points.minOf { it.lon }; val maxLon = points.maxOf { it.lon }
+        val rLat = (maxLat - minLat).let { if (it > 1e-9) it else 1e-9 }
+        val rLon = (maxLon - minLon).let { if (it > 1e-9) it else 1e-9 }
+        val w = size.width - 2 * pad
+        val h = size.height - 2 * pad
+        val pts = points.map { p ->
+            Offset(
+                pad + ((p.lon - minLon) / rLon).toFloat() * w,
+                pad + (1f - ((p.lat - minLat) / rLat).toFloat()) * h
+            )
+        }
+        for (i in 0 until pts.size - 1) {
+            drawLine(line.copy(alpha = 0.55f), pts[i], pts[i + 1], strokeWidth = 3f)
+        }
+        pts.forEachIndexed { i, o ->
+            val c = if (i == 0) startC else if (i == pts.lastIndex) endC else line
+            drawCircle(c, radius = if (i == 0 || i == pts.lastIndex) 6f else 4f, center = o)
         }
     }
 }

@@ -124,7 +124,8 @@ class MainActivity : ComponentActivity() {
                             onRing = { tracker -> ringTracker(tracker) },
                             onClearAll = { lifecycleScope.launch { repo.clearAll() } },
                             onOpenSafety = { showSafety = true },
-                            onOpenHistory = { showHistory = true }
+                            onOpenHistory = { showHistory = true },
+                            loadTrail = { id -> repo.trailFor(id) }
                         )
                     }
                 }
