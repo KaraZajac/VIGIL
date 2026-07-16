@@ -102,10 +102,22 @@ fun SafetyScreen(onBack: () -> Unit) {
 
             Spacer(Modifier.height(10.dp))
             OutlinedButton(
-                onClick = { go(Intent(Intent.ACTION_VIEW, Uri.parse("https://www.stalkingawareness.org/help-for-victims/"))) },
+                onClick = { go(Intent(Intent.ACTION_DIAL, Uri.parse("tel:18554842846"))) },
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Icon(Icons.Filled.OpenInNew, null, modifier = Modifier.size(18.dp)); Spacer(Modifier.size(8.dp)); Text("Stalking help & resources (SPARC)")
+                Icon(Icons.Filled.Call, null, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.size(8.dp))
+                Text("VictimConnect — 1-855-484-2846 (stalking victims)")
+            }
+
+            Spacer(Modifier.height(10.dp))
+            OutlinedButton(
+                onClick = { go(Intent(Intent.ACTION_VIEW, Uri.parse("https://www.stalkingawareness.org/what-to-do-if-you-are-being-stalked/"))) },
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Icon(Icons.Filled.OpenInNew, null, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.size(8.dp))
+                Text("What to do if you're being stalked (SPARC)")
             }
 
             Spacer(Modifier.height(16.dp))
