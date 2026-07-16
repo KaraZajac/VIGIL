@@ -40,6 +40,7 @@ import androidx.compose.material.icons.filled.Radar
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.Verified
 import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -51,6 +52,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -478,6 +480,23 @@ private fun TrackerDetail(
                 Spacer(Modifier.size(6.dp))
                 Text("Ring it")
             }
+        }
+        var showInfo by remember { mutableStateOf(false) }
+        Spacer(Modifier.height(8.dp))
+        OutlinedButton(onClick = { showInfo = true }, modifier = Modifier.fillMaxWidth()) {
+            Text("Who owns it?")
+        }
+        if (showInfo) {
+            AlertDialog(
+                onDismissRequest = { showInfo = false },
+                confirmButton = { TextButton(onClick = { showInfo = false }) { Text("Got it") } },
+                title = { Text("Who owns this tracker?") },
+                text = {
+                    Text(
+                        "Tap the tracker against the top of your phone (NFC). If it's an AirTag or a DULT tag in lost mode, your phone opens a page with the owner's masked phone or email. VIGIL stays offline - the tag's NFC hands the link to your browser."
+                    )
+                }
+            )
         }
         Spacer(Modifier.height(12.dp))
         when (status) {

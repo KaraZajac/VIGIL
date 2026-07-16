@@ -12,6 +12,8 @@ import android.bluetooth.BluetoothProfile
 import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
 import androidx.core.content.ContextCompat
 import kotlinx.coroutines.TimeoutCancellationException
@@ -98,7 +100,9 @@ object TrackerRinger {
         suspendCancellableCoroutine { cont ->
             var gatt: BluetoothGatt? = null
             var selected: Proto? = null
-            fun done(msg: String, g: BluetoothGatt) {
+            val handler = Handler(Looper.getMainLooper())
+            fun finish(msg: String, g: BluetoothGatt) {
+                handler.removeCallbacksAndMessages(null)
                 if (cont.isActive) cont.resume(msg)
                 g.disconnect()
             }
@@ -107,11 +111,14 @@ object TrackerRinger {
                     when (newState) {
                         BluetoothProfile.STATE_CONNECTED -> g.discoverServices()
                         BluetoothProfile.STATE_DISCONNECTED -> {
+                            handler.removeCallbacksAndMessages(null)
                             // An AirTag self-disconnects (status 19) once it has started ringing.
                             if (cont.isActive) {
-                                if (selected == AIRTAG && status == STATUS_PEER_DISCONNECT)
-                                    cont.resume("Ringing… listen for the AirTag.")
-                                else cont.resume("Tracker disconnected before it could ring.")
+                                cont.resume(
+                                    if (selected == AIRTAG && status == STATUS_PEER_DISCONNECT)
+                                        "Ringing - listen for the AirTag."
+                                    else "Tracker disconnected before it could ring."
+                                )
                             }
                             g.close()
                         }
@@ -120,9 +127,9 @@ object TrackerRinger {
 
                 override fun onServicesDiscovered(g: BluetoothGatt, status: Int) {
                     val proto = PRIORITY.firstOrNull { g.getService(it.service) != null }
-                        ?: return done("This tracker type doesn't expose a remote-ring service.", g)
+                        ?: return finish("This tracker type doesn't expose a remote-ring service.", g)
                     val ch = g.getService(proto.service)?.getCharacteristic(proto.characteristic)
-                        ?: return done("Ring characteristic missing on this tracker.", g)
+                        ?: return finish("Ring characteristic missing on this tracker.", g)
                     selected = proto
                     if (proto.cccd) {
                         g.setCharacteristicNotification(ch, true)
@@ -131,32 +138,41 @@ object TrackerRinger {
                         else BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
                         if (desc == null || !writeDescriptor(g, desc, v)) writeStart(g, ch, proto)
                     } else {
-                        if (!writeStart(g, ch, proto)) done("Couldn't send the ring command.", g)
+                        if (!writeStart(g, ch, proto)) finish("Couldn't send the ring command.", g)
                     }
                 }
 
                 override fun onDescriptorWrite(g: BluetoothGatt, desc: BluetoothGattDescriptor, status: Int) {
                     val proto = selected ?: return
                     val ch = g.getService(proto.service)?.getCharacteristic(proto.characteristic)
-                        ?: return done("Ring characteristic missing on this tracker.", g)
-                    if (!writeStart(g, ch, proto)) done("Couldn't send the ring command.", g)
+                        ?: return finish("Ring characteristic missing on this tracker.", g)
+                    if (!writeStart(g, ch, proto)) finish("Couldn't send the ring command.", g)
                 }
 
                 override fun onCharacteristicWrite(g: BluetoothGatt, ch: BluetoothGattCharacteristic, status: Int) {
-                    // AirTag reports via self-disconnect; others confirm here.
-                    if (selected == AIRTAG) {
-                        done("Ringing… listen for the AirTag.", g)
-                    } else {
-                        done(
-                            if (status == BluetoothGatt.GATT_SUCCESS)
-                                "Ring command sent. A tag only chirps when it's separated from its owner — your own tag that's with you won't."
-                            else "The tracker refused the ring command.", g
-                        )
-                    }
+                    if (selected == AIRTAG) { finish("Ringing - listen for the AirTag.", g); return }
+                    if (status != BluetoothGatt.GATT_SUCCESS) { finish("The tracker refused the ring command.", g); return }
+                    // DULT/FindMy confirm via an indication. Wait briefly; if none arrives, the tag
+                    // likely isn't separated from its owner (so it won't actually ring).
+                    handler.postDelayed({
+                        finish("Ring command sent, but the tracker didn't confirm - it only rings when separated from its owner.", g)
+                    }, 4000)
+                }
+
+                @Suppress("DEPRECATION")
+                override fun onCharacteristicChanged(g: BluetoothGatt, ch: BluetoothGattCharacteristic) {
+                    finish("Ringing confirmed - listen for the tracker.", g)
+                }
+
+                override fun onCharacteristicChanged(g: BluetoothGatt, ch: BluetoothGattCharacteristic, value: ByteArray) {
+                    finish("Ringing confirmed - listen for the tracker.", g)
                 }
             }
             gatt = device.connectGatt(context, false, callback, BluetoothDevice.TRANSPORT_LE)
-            cont.invokeOnCancellation { runCatching { gatt?.disconnect(); gatt?.close() } }
+            cont.invokeOnCancellation {
+                handler.removeCallbacksAndMessages(null)
+                runCatching { gatt?.disconnect(); gatt?.close() }
+            }
         }
 
     @Suppress("DEPRECATION")
