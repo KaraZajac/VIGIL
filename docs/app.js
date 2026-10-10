@@ -1,4 +1,4 @@
-/* OVERWATCH landing — count-up stats + scroll reveal. No network, no deps. */
+/* VIGIL landing — count-up stats + scroll reveal. No network, no deps. */
 (function () {
   'use strict';
   const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;

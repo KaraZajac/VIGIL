@@ -6,7 +6,7 @@
 <title>VIGIL — what's been following you?</title>
 <meta name="description" content="A native Android app that watches for personal item-trackers — AirTags, Tile, Samsung SmartTags, Google Find My — travelling with you over time. Fully offline, no INTERNET permission. The temporal counterpart to OVERWATCH.">
 <meta property="og:title" content="VIGIL — what's been following you?">
-<meta property="og:description" content="Android app that flags AirTags, Tile, SmartTags & Find My trackers travelling WITH you over time — even rotating-key clones. Fully offline, listens only.">
+<meta property="og:description" content="Android app that flags AirTags, Tile, SmartTags & Find My trackers travelling WITH you over time — even fast-rotating key clones. Fully offline, no internet permission.">
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://vigil.netslum.io/">
 <meta property="og:image" content="https://vigil.netslum.io/og.png">
@@ -54,7 +54,7 @@
   <div class="container hero-inner">
     <div class="hero-eyebrow">
       <span class="dot dot-pulse"></span>
-      v0.1.7 · Android · prototype
+      Android · prototype
     </div>
     <h1 class="hero-title">
       <span class="display-wordmark">VIGIL</span>
@@ -68,14 +68,14 @@
 
     <div class="phone-hero">
       <img class="phone" src="img/vigil-main.png?v=2" width="1096" height="2280"
-        alt="VIGIL main screen: a green &quot;You're clear — nothing has been following you&quot; card, a Stop Watching button, and a High/Medium/Low sensitivity selector." loading="eager">
+        alt="VIGIL main screen (earlier build): a green &quot;You're clear — nothing has been following you&quot; card, a Stop Watching button, and a High/Medium/Low sensitivity selector." loading="eager">
     </div>
 
     <div class="stats-row" id="stats-row">
       <div class="stat-chip"><span class="num" data-target="5">0</span><span>tracker ecosystems</span></div>
       <div class="stat-chip stat-vfy"><span class="num" data-target="3">0</span><span>escalation tiers</span></div>
       <div class="stat-chip"><span class="num" data-target="0">0</span><span>internet permission</span></div>
-      <div class="stat-chip"><span class="num">v0.1.7</span><span>latest APK</span></div>
+      <div class="stat-chip"><span class="num" data-target="2">0</span><span>detection paths</span></div>
     </div>
 
     <div class="cta-row">
@@ -104,7 +104,7 @@
           <strong>OVERWATCH is spatial</strong> — what surveillance is watching
           <em>this place</em>, right now. <strong>VIGIL is temporal</strong> —
           what has been with <em>you</em>, across time and places. VIGIL reuses
-          OVERWATCH's proven passive-scanning stack and adds a persistent
+          OVERWATCH's proven scanning stack and adds a persistent
           on-device store to reason about a tracker's history.
         </p>
       </div>
@@ -121,8 +121,11 @@
       <p class="lead">VIGIL recognises each BLE wire format and, where the
       ecosystem signals it, filters to the <strong>separated-from-owner</strong>
       state — the only state in which a <em>following</em> tracker is even
-      detectable. Chipolo, Pebblebee, eufy and the rest inherit whichever
-      network their SKU joined, so VIGIL detects the <em>network</em>.</p>
+      detectable. VIGIL takes that flag on trust, so a modified tag that
+      always claims its owner is nearby never escalates. Tile has no flag, so
+      every Tile is checked. Chipolo, Pebblebee, eufy and the rest inherit
+      whichever network their SKU joined, so VIGIL detects the
+      <em>network</em>.</p>
     </div>
 
     <div class="bento">
@@ -144,7 +147,7 @@
       <article class="bento-card">
         <div class="bento-icon">🟩</div>
         <h3>Tile</h3>
-        <p>Service data <code>0xFEED / 0xFEEC</code>. No separated signal and a static MAC — always findable, indefinitely.</p>
+        <p>Service data <code>0xFEED / 0xFEEC / 0xFE84</code>. No separated signal and a static MAC — always findable, indefinitely.</p>
       </article>
       <article class="bento-card bento-lg">
         <div class="bento-icon">🔗</div>
@@ -161,10 +164,10 @@
     <div class="section-head">
       <span class="section-tag">how it decides</span>
       <h2>Persistence, not proximity.</h2>
-      <p class="lead">A tracker is escalated only when it clears the
+      <p class="lead">A tracker raises an alert only when it clears the
       <strong>co-movement test</strong> — the same device, seen at many of
-      <em>your</em> distinct places, over a sustained window, while close enough
-      to actually be on you.</p>
+      <em>your</em> distinct places, over a sustained window. VIGIL judges each
+      tracker's last 24 hours.</p>
     </div>
 
     <div class="bento">
@@ -188,15 +191,15 @@
     <div class="tiers" style="margin-top:2.4rem">
       <div class="tier tier-green">
         <div class="tier-name" style="font-size:1.15rem">OBSERVED</div>
-        <p>Seen, logged, geotagged — but hasn't cleared the co-movement test. No alarm.</p>
+        <p>Seen, logged, geotagged. Either never seen separated from its owner (a Tile always counts as separated), or not yet seen three times near enough. No alarm.</p>
       </div>
       <div class="tier tier-yellow">
         <div class="tier-name" style="font-size:1.15rem">SUSPICIOUS</div>
-        <p>Co-moving across your places. VIGIL is watching it closely.</p>
+        <p>Seen three or more times, 15 minutes apart, with a peak above the RSSI floor, but not yet across enough places or time. No notification yet; VIGIL keeps watching.</p>
       </div>
       <div class="tier tier-red">
         <div class="tier-name" style="font-size:1.15rem">ALERTING</div>
-        <p>Confirmed following you. Surfaced with the "Make it ring" and hot/cold finder tools.</p>
+        <p>Cleared the full co-movement test, so VIGIL raises an alert. "Make it ring" and the hot/cold finder help you find it.</p>
       </div>
     </div>
 
@@ -206,14 +209,14 @@
           <span class="anno-num">✓</span>
           <div>
             <strong>Allowlist — "This is mine"</strong>
-            <p>Tap a tracker to approve it — your own AirTag, your partner's Tile — and it never alerts again.</p>
+            <p>Tap a tracker to approve it — your own AirTag, your partner's Tile — and VIGIL stops alerting on that identity. Tiles keep one identity; other tags change theirs at least daily and can come back as a new device.</p>
           </div>
         </div>
         <div class="annotation">
           <span class="anno-num">✓</span>
           <div>
             <strong>Learned offline baseline</strong>
-            <p>VIGIL learns the places you dwell (home, work) as anchors; a tracker seen at an anchor across several days is auto-marked <strong>Known (home)</strong> — so household tags fall silent on their own, entirely on-device.</p>
+            <p>VIGIL learns the places you spend time (home, work) as anchors. A tracker seen at an anchor on three different days, without moving with you, is auto-marked <strong>Known (usual places)</strong>, entirely on-device. In practice that's Tiles, the only tags that keep one identity for days; other household tags stay quiet because they don't travel with you, or report being near their owner.</p>
           </div>
         </div>
       </div>
@@ -236,19 +239,20 @@
       <figure class="shot">
         <img class="phone" src="img/vigil-active.png" width="1096" height="2560"
           alt="VIGIL active list: an ACTIVE (6) list of nearby Apple Find My and Google Find My Device trackers, each showing places seen, signal in dBm, time since last seen, and an It's-mine button." loading="lazy">
-        <figcaption><strong>The active list</strong>Every tracker seen moving with you — signal, places, and how long ago. Tap &ldquo;It's mine&rdquo; and your own gear drops out.</figcaption>
+        <figcaption><strong>The active list</strong>Every tracker heard in the last 10 minutes, with its status, places, signal and how long ago. Tap &ldquo;It's mine&rdquo; and your own gear drops out.</figcaption>
       </figure>
       <figure class="shot">
         <img class="phone" src="img/vigil-locate.png" width="1096" height="2560"
-          alt="VIGIL locate screen for an Apple Find My tracker: a large pulsing radar icon reading Searching… walk around, no signal yet, with a Make-it-ring button." loading="lazy">
-        <figcaption><strong>Locate mode</strong>Pick a suspect and walk — the ripple strengthens as you close in. No signal yet? Keep moving.</figcaption>
+          alt="VIGIL locate screen for an Apple Find My tracker: a radar icon in a circle reading Searching… walk around, no signal yet, with a Make-it-ring button." loading="lazy">
+        <figcaption><strong>Locate mode</strong>Pick a suspect and walk — the circle grows and turns green as you close in. No signal yet? Keep moving.</figcaption>
       </figure>
       <figure class="shot">
         <img class="phone" src="img/vigil-signal.png" width="1096" height="2560"
-          alt="VIGIL locate screen for a Google Find My Device tracker reading Close, minus 52 dBm, with a Make-it-ring button and a Ringing… listen for the tracker toast." loading="lazy">
-        <figcaption><strong>Getting warmer</strong>Live signal strength as you approach — &minus;52 dBm is close. &ldquo;Make it ring&rdquo; forces a silent tracker to give itself up.</figcaption>
+          alt="VIGIL locate screen for a Google Find My Device tracker reading Close, minus 52 dBm, with a Make-it-ring button." loading="lazy">
+        <figcaption><strong>Getting warmer</strong>Live signal strength as you approach. &ldquo;Make it ring&rdquo; asks it to play its sound and tells you what it answered. A silent or modified tag won't ring; the meter is how you find that one.</figcaption>
       </figure>
     </div>
+    <p class="tl-foot" style="text-align:center">Screenshots are from an earlier build. The current app words some screens differently, and its header adds History and Safety buttons.</p>
   </div>
 </section>
 
@@ -280,10 +284,15 @@
           instead of the identity: it counts seamless hand-overs to never-seen
           identities and gates the alarm on co-movement. In offline replay it
           confirms the published <em>Find You</em> setting in about six minutes.
-          It does not catch everything yet: a clone that rotates every ~85
-          seconds to ~45 minutes, or goes quiet for 30 s at a time, slips past
-          both of VIGIL's detectors today. Testing on real hardware is what
-          remains.
+          It does not catch everything yet. At the default sensitivity, a
+          clone that rotates every ~85 seconds to ~45 minutes (30 min on High,
+          90 min on Low) slips past both of VIGIL's detectors today, and so
+          does a fast-rotating clone that cycles its radio on and off (30 s
+          on, 30 s off in our tests), because any silence over 20 s ends the
+          clone detector's run. Nor does VIGIL
+          watch across days yet: the identity test looks back 24 hours and the
+          clone detector starts fresh each session. Closing those gaps, and
+          testing on real hardware, are what remain.
         </p>
         <a href="https://github.com/KaraZajac/VIGIL/blob/main/docs/detection-rotation-clone.md" class="audience-link" style="margin-top:.8rem;display:inline-block">Read the algorithm →</a>
       </div>
@@ -296,7 +305,7 @@
   <div class="container">
     <div class="section-head">
       <span class="section-tag">on-device, private</span>
-      <h2>Fully offline. It only listens.</h2>
+      <h2>Fully offline. It never phones home.</h2>
     </div>
 
     <div class="bento">
@@ -306,14 +315,16 @@
         <p>
           There is no server, no account, no telemetry. Every tracker, every
           sighting, and the entire learned baseline live in an on-device SQLite
-          database and <strong>never leave the phone</strong>. Detection is
-          entirely passive — it listens only.
+          database. VIGIL never transmits them and cloud backup is off; they
+          <strong>leave the phone only if you export an evidence report
+          yourself</strong>. Detection listens to what trackers already
+          broadcast and never connects to them.
         </p>
       </article>
       <article class="bento-card">
         <div class="bento-icon">🔔</div>
         <h3>Make it ring</h3>
-        <p>Tap a suspected tracker to connect over GATT and play its own sound — the DULT-standard way for a victim to locate a hidden AirTag / Find My / Chipolo tag.</p>
+        <p>Ask a suspected tracker over GATT to play its own sound — the DULT-standard way for a victim to locate a hidden AirTag / Find My / Chipolo tag. VIGIL reports what the tracker answered, and a tag that refuses (as it must while with its owner) shows as refusing.</p>
       </article>
       <article class="bento-card">
         <div class="bento-icon">🌡</div>
@@ -334,7 +345,7 @@
     <div class="timeline dl-steps" style="grid-template-columns:repeat(3,1fr) !important">
       <div class="tl-col tl-shipped">
         <div class="tl-tag">1 · download</div>
-        <ul><li>Grab the latest debug-signed APK from <a href="https://github.com/KaraZajac/VIGIL/releases/latest">Releases</a> (currently <strong>v0.1.7</strong>).</li></ul>
+        <ul><li>Grab the latest debug-signed APK from <a href="https://github.com/KaraZajac/VIGIL/releases/latest">Releases</a>.</li></ul>
       </div>
       <div class="tl-col tl-active">
         <div class="tl-tag">2 · install</div>
@@ -342,7 +353,7 @@
       </div>
       <div class="tl-col tl-next">
         <div class="tl-tag">3 · grant + scan</div>
-        <ul><li>Grant nearby-devices + location + notifications, pick a sensitivity, and let it run in the background.</li></ul>
+        <ul><li>Grant nearby-devices + location + notifications and keep location on (without a fix VIGIL can't count places, so it can't alert). Pick a sensitivity and tap Start Watching; it keeps watching in the background until you stop it or the phone restarts.</li></ul>
       </div>
     </div>
     <p class="tl-foot">
@@ -363,7 +374,7 @@
         VIGIL
       </div>
       <p class="footer-tag">
-        Temporal counter-tracking for Android. Fully offline, listens only.
+        Temporal counter-tracking for Android. Fully offline, no internet permission.
         A sibling to OVERWATCH.
       </p>
     </div>
@@ -393,11 +404,12 @@
   </div>
   <div class="container footer-bottom">
     <p>
-      VIGIL is a passive, on-device situational-awareness tool. It does not
-      transmit, probe, or interfere — except the user-initiated "Make it ring".
+      VIGIL is an on-device situational-awareness tool. It listens to what
+      trackers broadcast and never connects to or interferes with them —
+      except the user-initiated "Make it ring".
     </p>
     <p class="footer-meta">
-      v0.1.7 · <a href="https://github.com/KaraZajac/VIGIL">github.com/KaraZajac/VIGIL</a>
+      <a href="https://github.com/KaraZajac/VIGIL">github.com/KaraZajac/VIGIL</a>
     </p>
     <div class="onion-line">
       <span class="onion-label">Also on Tor</span>

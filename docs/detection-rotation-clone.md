@@ -1,10 +1,11 @@
 # VIGIL — Detecting Key-Rotating Tracker Clones by Presence, Not Identity
 
-**Design document · the core novel detection algorithm (problem #1) · v1 · 2026-07-14**
+**Design document · the core novel detection algorithm (problem #1) · v1 · 2026-07-14 · revised 2026-10-10**
 
 Target: on-device Android (Kotlin), no server. Slots into VIGIL's `scan/` +
-`detect/` architecture; the co-movement v1 in `detect/CoMovementEvaluator.kt`
-ships now, the presence engine below (`detect/PresenceEngine.kt`) is next.
+`detect/` architecture. Both paths ship: the identity path in
+`detect/CoMovementEvaluator.kt`, and a v1 of the presence engine below in
+`detect/PresenceEngine.kt` that implements part of this design — §2.7 says what.
 
 ---
 
@@ -13,10 +14,11 @@ ships now, the presence engine below (`detect/PresenceEngine.kt`) is next.
 Every deployed anti-stalking detector — Apple *Tracker Detect*, iOS *Find My*
 unwanted-tracking alerts, and TU-Darmstadt's **AirGuard** — keys on **device
 identity**: it counts repeat sightings of one BLE identifier and alarms at a
-threshold (AirGuard: the *same* identifier seen **≥ 3 times across a location
-change**). A key-rotating clone (Positive Security's **Find You**: an ESP32
-cycling **2000** Find My public keys, a new one every **~30 s**) presents each
-sighting as a brand-new device, so the repeat count never accumulates. In the
+threshold (AirGuard: the *same* identifier seen **≥ 3 times at several distinct
+locations over at least 30, 60 or 120 minutes**, by sensitivity). A key-rotating
+clone (Positive Security's **Find You**: an ESP32 cycling **2000** Find My public
+keys, a new one every **~30 s**) presents each sighting as a brand-new device, so
+the repeat count never accumulates. In the
 authors' 5-day carry test in February 2022, **no tool raised any passive alert**;
 AirGuard's manual scan listed the clone only as one new device per beacon, and its
 background mode was not tested.
@@ -84,7 +86,7 @@ Close band: `rssi ≥ R_close` (starter **−65 dBm**).
 **(a) Novel-identifier churn rate `λ_novel`.** Keep a set `Seen` of `eid`s over
 horizon `H` (30 min). A sighting is *novel* if `eid ∉ Seen`.
 `λ_novel(t) = |distinct eid first seen in (t−W, t]| / W` (W = 5 min).
-Real separated tracker → ~0.0007/min. Find You @30 s → ~2/min. A ~2800× gap.
+Real separated tracker → ~0.0007/min. Find You @30 s → ~2/min. A ~2880× gap.
 
 **(b) Presence continuity `PC`** — is the close band *continuously occupied*,
 regardless of *who* occupies it?
@@ -146,6 +148,8 @@ Stage B  presence-track confirmer (armed on trigger): identity-agnostic single
          presence-run duration                        → candidate
 Stage C  co-movement gate + scoring: requires Dnet, distinct cells, v̄>0 → 0–100
 ```
+
+v1 replaces Stage A with a fixed churn gate and has no v̄ test (§2.7).
 
 ### 2.3 / 2.4 State + update rule
 
@@ -211,23 +215,53 @@ fun scoreLive(p: PresenceRun): Int {
 ```
 
 Tiers (VIGIL 4-tier): `<40` clear · `40–69` WATCHING (soft) · `70–84` probable
-clone · `85+` persisted across ≥ K_CELLS cells / mode change.
+clone · `85+` persisted across ≥ K_CELLS cells / mode change. v1: `≥ 85` *and*
+RSSI-coherent is CONFIRMED, the only tier that notifies; there is no mode-change
+test (§2.7).
 
 ### 2.5 Starter parameters
 
 `R_CLOSE −65 dBm · δ 10 s · G_BREAK 20 s · G_SEAM 6 s · EPS_RSSI 8 dB · SIGMA_MAX
 8 dB · H 30 min · W 5 min · CUSUM k 0.5, h 5, μ0/σ0 = rolling personal baseline ·
-α 0.3 · ρ (min novel-seamless rate) 0.7/min · D_NET 500 m · K_CELLS 3×250 m ·
-V_MIN 1 m/s · T_MIN 10 min (ORANGE)/3 min (WATCHING) · N_HANDOVER 12`.
+α 0.3 · ρ (min novel-seamless rate) 0.7/min · D_NET 500 m · K_CELLS 3 geohash-7
+cells (~150 m) · V_MIN 1 m/s · T_MIN 10 min (ORANGE)/3 min (WATCHING) ·
+N_HANDOVER 12`.
+
+v1 uses R_CLOSE, G_BREAK, G_SEAM, EPS_RSSI (which doubles as SIGMA_MAX), H, α, ρ,
+N_HANDOVER, D_NET, K_CELLS, and T_MIN 10 min as the dwell for full duration credit.
+δ, W, the CUSUM parameters, V_MIN and the 3-min WATCHING dwell are design-only.
 
 ### 2.6 Fit to VIGIL
 
 Runs entirely on-device over the existing scan path. `scan/TrackerParser.kt`
-already emits per-ecosystem separated sightings; add speed to the record via
-`LocationProvider`. New `detect/PresenceEngine.kt` holds `ChurnCusum` +
-`PresenceRun` + the novelty set as a pure streaming function (offline-testable,
-§5). Keep a bounded ring buffer over horizon `H`; multi-session mode (§4.3) is
-opt-in.
+already emits per-ecosystem separated sightings, and `detect/PresenceEngine.kt` is
+the streaming function over them (offline-testable, §5), with its novelty set
+bounded by horizon `H`. Speed in the record, the CUSUM trigger and multi-session
+mode (§4.3, which would be opt-in) are not built.
+
+### 2.7 What v1 ships (2026-10)
+
+- **Feed.** Every separated advert, unthrottled and in time order. Tile has no
+  separated flag, so it never reaches this path; the identity path covers it. The
+  engine starts fresh each time watching starts, and its novelty set spans 30 min.
+- **No CUSUM (Stage A).** A fixed churn gate instead: a run needs ≥ 12 seamless
+  novel handovers at a run-average ≥ 0.7/min — the "~85 s" churn ceiling of §4.1.
+- **Presence run.** Close band ≥ −65 dBm. More than 20 s without a close-band
+  advert ends the run, and the next advert starts a new one from zero. Seamless =
+  into a novel id, ≤ 6 s after the last close-band advert, within 8 dB of the RSSI
+  EWMA (α 0.3).
+- **Co-movement gate.** Net displacement ≥ 500 m from the run's first fix and ≥ 3
+  distinct geohash-7 cells (~150 m; adjacent cells count). No speed test.
+- **Coherence.** EWMA of the absolute RSSI residual ≤ 8 dB.
+- **Score.** Duration 30 (full at 10 min) + handovers 30 (full at 12) + cells 20
+  (full at 6) + coherence 20 (8 if incoherent). Churn is a gate, not a multiplier;
+  churn without co-movement scores a fixed 50 (WATCHING).
+- **Tiers.** ≥ 40 WATCHING, ≥ 70 PROBABLE, ≥ 85 *and* coherent CONFIRMED. Only
+  CONFIRMED notifies (2 h cooldown) and is saved to alert history; WATCHING and
+  PROBABLE are never shown. CONFIRMED takes about 5–8 min of unbroken run (6.0 min
+  on the simulated Find You config).
+- **Not built:** txPower normalization, δ/PC occupancy, speed/V_MIN, the
+  mode-change gate (§3.3), reacquire (§4.2), multi-session detection (§4.3).
 
 ---
 
@@ -239,7 +273,7 @@ high. FPs are where this feature lives or dies.
 | Scenario | Fires | Killed by |
 |---|---|---|
 | Dense-urban walk / festival | high λ_novel, PC≈1 | **seamless chain fails** — a crowd is many radios ⇒ gappy, RSSI-discontinuous handovers, high ewmaAbsResid |
-| Apartment / at home | high PC, stationary | **co-movement gate** (v̄≈0, 1 cell) ⇒ score 0 |
+| Apartment / at home | high PC, stationary | **churn gate** (household tags keep their ids) ⇒ score 0; a stationary churning source fails the **co-movement gate** (< 500 m, < 3 cells) ⇒ WATCHING at most, silent |
 | One stranger's real AirTag on your bus | co-moving, close, stable | not the clone path (it has 1 id/24 h) — handled by the identity detector + dismiss/whitelist UX |
 | Busload of strangers' real tags | co-moving, PC≈1 | **novel-churn ≈ 0** (stable set of stable ids) ⇒ clone path silent |
 | Rush-hour subway w/ heavy boarding churn | A + B + partial C | **the genuinely hard case — §3.3** |
@@ -255,10 +289,13 @@ three signals align. What still separates it: those tags are at many distances
 (high ewmaAbsResid, low seamless fraction) and turnover is bursty/stop-synced, not
 a 30 s metronome. The decisive gate: **persistence across a mode change** — a
 transit crowd cannot follow you *off the train and down the street*. Requiring the
-coherent co-moving presence to survive a context transition drops transit FPs to
-~0, **at the cost of latency**. That is the honest central trade: lower transit FP
-is bought with detection latency. The MVP keeps transit at WATCHING (silent) and
-escalates only after a mode change or ≥ T_MIN beyond the transit segment.
+coherent co-moving presence to survive a context transition should drop transit FPs
+to ~0, **at the cost of latency**. That is the honest central trade: lower transit
+FP is bought with detection latency. v1 has no mode-change gate. It relies on the
+coherence gate instead: a crowd at many distances is RSSI-incoherent, so it reaches
+PROBABLE at most and stays silent. The harness's synthetic rush-hour trace never
+even opens the churn gate (2 seamless handovers, no alert); real transit is
+untested.
 
 ---
 
@@ -306,9 +343,9 @@ gets closed.
 | Move | Effect | Response | Residual |
 |---|---|---|---|
 | Slower rotation | λ_novel drops | identity path re-engages only past its minimum span (§4.1) | **low in v1** — a few-minute rotation evades both paths (measured) |
-| Variable TX power | RSSI jitter weakens coherence | normalize by advertised txPower; lean on continuity+co-move+churn | med–high |
+| Variable TX power | RSSI jitter weakens coherence | design: normalize by advertised txPower. v1 has no normalization and leans on continuity + co-move + churn (harness: still CONFIRMED at σ 12 dB, latency 6 → 18.5 min) | med–high |
 | Intermittent duty-cycling | gaps reset runs | reacquire logic (designed, **not in v1**): a gap < G_reacq (3 min) resuming at coherent RSSI along your path = same presence; accumulate across gaps | **none in v1** — 30 s on / 30 s off is never detected (measured); medium once reacquire ships |
-| Blend into transit | crowd cover | mode-change gate (§3.3) | medium (needs latency) |
+| Blend into transit | crowd cover | mode-change gate (§3.3; designed, not in v1, which relies on the coherence gate) | medium (needs latency) |
 
 ### 4.3 The true floor
 
@@ -320,9 +357,9 @@ detection must move to **cross-session recurrence** — the same anomalous weakl
 co-moving presence recurring day after day along your routes (a per-day coarse
 RSSI/timing fingerprint matched across sessions). That trades **days of latency**
 and needs opt-in persistent storage. **The honest floor: a patient, low-duty-cycle
-adaptive attacker pushes VIGIL from minutes-latency single-session detection to
-days-latency multi-session detection.** Say so; don't claim an impossible
-guarantee.
+adaptive attacker can be caught only by days-latency multi-session detection, which
+VIGIL does not have yet — and v1 is beaten well above that floor: it already misses
+a plain 50% duty cycle (§4.2).** Say so; don't claim an impossible guarantee.
 
 ---
 
@@ -332,16 +369,22 @@ guarantee.
    (base: `positive-security/find-you`), sweeping `rotationPeriod ∈ {30 s … 24 h}`,
    `txPower ∈ {fixed, ±k dB}`, `dutyCycle ∈ {100%, 50%, 20%, bursty}`,
    `keyPoolSize`. Carried, it is a real co-moving emitter → ground-truth-positive
-   without endangering anyone.
+   without endangering anyone. *Status (2026-10):* built for the Flipper Zero
+   instead (`flipper/vigil_emitter/`): rotation 30 s … static, duty 100% … 10%,
+   fixed TX power 0 … −40 dBm; no TX jitter, bursty duty or key pool; no field run
+   yet.
 2. **Ambient baselines** (ground-truth-negative), by class: rural drive · suburban
    · dense-urban walk · bus · subway/rush-hour · highway · apartment · café. Paired
-   runs (same route, emitter on/off).
+   runs (same route, emitter on/off). *Status:* none recorded yet.
 3. **Record/replay harness** — make `PresenceEngine` a pure
    `List<Sighting> → List<ScoredEvent>`; record raw sightings once, replay JSONL to
    A/B thresholds deterministically offline (unit tests / in-app debug screen).
    Synthesize attack-in-context by merging a clean run with an emitter-only trace.
+   *Status (2026-10):* the harness exists (`app/src/test/kotlin/org/soulstone/vigil/eval/`)
+   but replays synthetic traces only (`SimTraces`, a log-distance path-loss and
+   mobility model); there is no recorder or JSONL yet.
 4. **Metrics:** TPR @ ≤ 1 FP / active-carry-day per class; detection latency
-   (attach → first ORANGE), target ≤ 10–15 min for default Find You; ROC/AUC;
+   (attach → first CONFIRMED), target ≤ 10–15 min for default Find You; ROC/AUC;
    robustness curves (TPR vs rotationPeriod / txPower / dutyCycle); ablations
    (churn-only → +coherence → +co-move gate → full).
 
@@ -355,22 +398,23 @@ honest caveats.**
 Real, not hype: the attack must maintain a continuous coherent co-moving presence
 to function; the standards mandate 24 h rotation, giving a *categorical* anomaly
 baseline; the identity×churn squeeze can leave no safe rate once both paths reach
-far enough (v1's do not yet — §4.1); and VIGIL strictly dominates incumbents on
-the published attack (they raised zero alerts on Find You in 2022; in offline replay VIGIL
-raises one). Research-grade long shots: robust low-FP detection in live rush-hour
-transit, and a patient low-duty-cycle adaptive attacker (provably forced to
-multi-session/days latency).
+far enough (v1's do not yet — §4.1); and on the published attack the incumbents
+raised zero alerts in the 2022 field test, while VIGIL raises one in offline replay
+of that configuration (no field run yet). Research-grade long shots: robust low-FP
+detection in live rush-hour transit, and a patient low-duty-cycle adaptive attacker
+(which pushes detection to multi-session, days-latency territory that VIGIL does not
+have; v1 already misses a 50% duty cycle).
 
-**Minimum viable version (ship first).** Target the published Find You config
-(30 s, fixed power, ~100% duty) — the exact attack that renders AirGuard silent:
-Stage A CUSUM trigger; Stage B presence track counting novel *seamless*
-handovers with RSSI coherence; Stage C hard co-movement gate (ORANGE after ≥10
-min coherent co-moving presence, ≥12 novel seamless handovers, ≥3 cells while
-v̄>1 m/s; RED after a cell/mode change). Run the classic identity detector in
-parallel. New tier distinct from the identity-based alert, with a dismiss/whitelist
-UX for the stranger-on-your-commute case. Detects the real-world clone in ~10–15
-min at a near-zero FP rate outside rush-hour transit — and is honest about the
-adaptive-attacker floor.
+**Minimum viable version (shipped as v1, §2.7).** Target the published Find You
+config (30 s, fixed power, ~100% duty) — the exact attack no tool alerted on in the
+2022 test: a fixed churn gate (≥ 12 novel seamless handovers at ≥ 0.7/min) in place of
+the CUSUM trigger, a presence track counting novel *seamless* handovers with RSSI
+coherence, and a hard co-movement gate (≥ 500 m, ≥ 3 cells). Only CONFIRMED
+(score ≥ 85 and coherent) alerts, as its own notification distinct from the
+identity-based alert, while the classic identity detector runs in parallel. In
+offline replay it reaches CONFIRMED in ~6 min on the simulated Find You config,
+with no alerts on the dense-urban, at-home or rush-hour traces. The ~10–15 min
+real-world target is not yet field-tested, and v1 has the gaps of §4.1 and §4.2.
 
 ---
 
