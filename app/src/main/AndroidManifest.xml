@@ -8,7 +8,7 @@
          both forbids deriving location AND silently filters beacon-shaped
          advertisements from scan results (the exact payloads we parse). -->
     <uses-permission android:name="android.permission.BLUETOOTH_SCAN" />
-    <!-- Only used later to GATT-connect to a suspect tag for Play-Sound / Get-Identifier (DULT). -->
+    <!-- Used only when the user taps "Make it ring", to GATT-connect to that one tag. -->
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
 
     <!-- BLE legacy (Android 11 and below) -->

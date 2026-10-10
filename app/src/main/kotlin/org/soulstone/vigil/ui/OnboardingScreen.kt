@@ -43,7 +43,7 @@ fun OnboardingScreen(onFinish: () -> Unit) {
             Spacer(Modifier.height(14.dp))
             Text("VIGIL", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
             Text(
-                "Know what's been following you.",
+                "Spot trackers that travel with you.",
                 style = MaterialTheme.typography.bodyLarge,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -52,12 +52,12 @@ fun OnboardingScreen(onFinish: () -> Unit) {
             Point(
                 Icons.Filled.Sensors,
                 "Finds what follows you",
-                "Detects AirTags, Tile, Samsung SmartTags and Find My trackers that travel with you over time — not just whatever happens to be nearby."
+                "Looks for AirTags, Tiles, Samsung SmartTags, and Apple and Google Find My tags that travel with you over time — not just whatever happens to be nearby."
             )
             Point(
                 Icons.Filled.Lock,
                 "Stays on your phone",
-                "No account, no internet, no telemetry. Everything VIGIL learns lives on this device and never leaves it."
+                "No account, no internet, no telemetry, no cloud backup. What VIGIL learns stays on this device unless you export it."
             )
             Point(
                 Icons.Filled.LocationOn,

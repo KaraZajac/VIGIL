@@ -232,7 +232,7 @@ class TrackerRepository(
         val sb = StringBuilder()
         sb.appendLine("VIGIL — tracker evidence report")
         sb.appendLine("Generated: ${fmt.format(Date())}")
-        sb.appendLine("Times are this phone's local time; locations are approximate (phone GPS).")
+        sb.appendLine("Times are this phone's local time; locations are approximate (phone location services, often ±100 m).")
         sb.appendLine("=".repeat(52))
         for ((trackerId, group) in alerts.groupBy { it.trackerId }) {
             val head = group.first()
@@ -242,11 +242,11 @@ class TrackerRepository(
             sb.appendLine("Flagged ${group.size} time(s):")
             for (a in group) {
                 val where = if (a.lat != null && a.lon != null) "%.5f, %.5f".format(a.lat, a.lon) else "no location"
-                sb.appendLine("  - ${fmt.format(Date(a.timestamp))} : ${a.distinctPlaces} places, peak ${a.peakRssi} dBm, at $where")
+                sb.appendLine("  - ${fmt.format(Date(a.timestamp))} : ${a.distinctPlaces} places, ${signalWord(a)} ${a.peakRssi} dBm, at $where")
             }
             val geo = db.sightingDao().allFor(trackerId).filter { it.lat != null && it.lon != null }
             if (geo.isNotEmpty()) {
-                sb.appendLine("  Seen with you at ${geo.size} location(s):")
+                sb.appendLine("  Geotagged sightings (${geo.size}):")
                 for (s in geo) {
                     sb.appendLine("    ${fmt.format(Date(s.timestamp))}  ${"%.5f, %.5f".format(s.lat, s.lon)}  ${s.rssi} dBm")
                 }
@@ -299,6 +299,11 @@ class TrackerRepository(
         const val CLONE_TRACKER_ID = "clone:rotating"
     }
 }
+
+/** A clone alert stores the RSSI of the advert that confirmed it, not a peak over a
+ *  window, so evidence shown to anyone else must not call it one. */
+fun signalWord(a: AlertEntity): String =
+    if (a.trackerId == TrackerRepository.CLONE_TRACKER_ID) "signal" else "peak"
 
 private fun ecoLabel(name: String): String =
     runCatching { TrackerEcosystem.valueOf(name).display }.getOrDefault(name)

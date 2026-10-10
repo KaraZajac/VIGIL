@@ -100,7 +100,12 @@ class MainActivity : ComponentActivity() {
                     else -> {
                         val running by ScanService.running.collectAsState()
                         val scanFault by ScanService.scanFault.collectAsState()
+                        val locationFault by ScanService.locationFault.collectAsState()
                         val trackers by repo.observeTrackers().collectAsState(initial = emptyList())
+                        // Newest first. The hero needs it because a rotating-clone alert
+                        // has no tracker row, and an alerted tag drops off the Active list
+                        // after 10 min — either way the card would otherwise go green.
+                        val alerts by repo.observeAlerts().collectAsState(initial = emptyList())
                         val sensitivity by settings.sensitivity.collectAsState()
                         val granted by permissionsGranted
                         val notifyGranted by notificationsGranted
@@ -122,6 +127,8 @@ class MainActivity : ComponentActivity() {
                                 else openAppSettings()
                             },
                             scanFault = scanFault,
+                            locationFault = locationFault,
+                            latestAlert = alerts.firstOrNull(),
                             onStartStop = {
                                 if (running) {
                                     ScanService.stop(this)

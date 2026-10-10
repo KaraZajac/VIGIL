@@ -31,6 +31,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import org.soulstone.vigil.data.db.AlertEntity
+import org.soulstone.vigil.data.signalWord
 import org.soulstone.vigil.model.TrackerEcosystem
 
 /** Log of past alerts, with a one-tap evidence export (report + GPX). */
@@ -60,14 +61,14 @@ fun HistoryScreen(
             }
             Spacer(Modifier.height(6.dp))
             Text(
-                "Export saves a timestamped report and a GPX track (open it in a maps app). Files stay on your phone until you share them.",
+                "Export builds a timestamped report and a GPX file of the alerted trackers (open it in a maps app), then opens the share sheet. Nothing leaves the phone unless you send it.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
             Spacer(Modifier.height(16.dp))
             if (alerts.isEmpty()) {
                 Text(
-                    "No alerts yet. When a tracker is confirmed following you, it'll be logged here.",
+                    "No alerts yet. When VIGIL alerts on a tracker moving with you, it's logged here.",
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             } else {
@@ -85,7 +86,7 @@ private fun AlertRow(a: AlertEntity) {
         Column(Modifier.padding(14.dp)) {
             Text(ecoName(a.ecosystem), fontWeight = FontWeight.SemiBold)
             Text(
-                "${a.distinctPlaces} places · peak ${a.peakRssi} dBm · ${rel(a.timestamp)}",
+                "${a.distinctPlaces} places · ${signalWord(a)} ${a.peakRssi} dBm · ${rel(a.timestamp)}",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )

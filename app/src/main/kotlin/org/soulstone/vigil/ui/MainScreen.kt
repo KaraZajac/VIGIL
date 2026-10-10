@@ -37,6 +37,7 @@ import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.GppMaybe
 import androidx.compose.material.icons.filled.HealthAndSafety
 import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.filled.LocationOff
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Radar
 import androidx.compose.material.icons.filled.Shield
@@ -78,7 +79,11 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import org.soulstone.vigil.BuildConfig
+import android.os.SystemClock
+import org.soulstone.vigil.data.TrackerRepository
+import org.soulstone.vigil.data.db.AlertEntity
 import org.soulstone.vigil.data.db.TrackerEntity
+import org.soulstone.vigil.detect.CoMovementEvaluator
 import org.soulstone.vigil.model.Sensitivity
 import org.soulstone.vigil.model.TrackerEcosystem
 import org.soulstone.vigil.R
@@ -97,6 +102,8 @@ fun MainScreen(
     permissionMessage: String?,
     onPermissionClick: () -> Unit,
     scanFault: String?,
+    locationFault: String?,
+    latestAlert: AlertEntity?,
     onStartStop: () -> Unit,
     onSetSensitivity: (Sensitivity) -> Unit,
     onApprove: (String, Boolean) -> Unit,
@@ -125,6 +132,7 @@ fun MainScreen(
     val trusted = trackers.filter { isTrusted(it) }
     val alerting = active.count { statusOf(it) == TrackerStatus.ALERTING }
     val suspicious = active.count { statusOf(it) == TrackerStatus.SUSPICIOUS }
+    val recentAlert = latestAlert?.takeIf { now - it.timestamp < RECENT_ALERT_MS }
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
@@ -191,7 +199,7 @@ fun MainScreen(
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             item { Spacer(Modifier.height(4.dp)) }
-            item { StatusHero(running, alerting, suspicious, scanFault) }
+            item { StatusHero(running, alerting, suspicious, scanFault, locationFault, recentAlert) }
             item {
                 Button(
                     onClick = onStartStop,
@@ -222,14 +230,17 @@ fun MainScreen(
 
             item {
                 SectionHeader(
-                    if (active.isEmpty()) "Nothing following you" else "Active (${active.size})"
+                    if (active.isEmpty()) "Nothing nearby" else "Active (${active.size})"
                 )
             }
             if (active.isEmpty()) {
                 item {
                     Text(
-                        if (running) "Listening… no trackers are moving with you."
-                        else "Not scanning. Tap Start Watching.",
+                        when {
+                            !running -> "Not scanning. Tap Start Watching."
+                            scanFault != null -> "Not listening right now — see above."
+                            else -> "Listening… no unknown trackers heard in the last 10 minutes."
+                        },
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -249,7 +260,7 @@ fun MainScreen(
 
             item {
                 Text(
-                    "VIGIL ${BuildConfig.VERSION_NAME} · no network, no accounts, no data leaves this phone",
+                    "VIGIL ${BuildConfig.VERSION_NAME} · no network, no accounts, no cloud backup",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(vertical = 16.dp)
@@ -287,7 +298,14 @@ fun MainScreen(
 }
 
 @Composable
-private fun StatusHero(running: Boolean, alerting: Int, suspicious: Int, scanFault: String?) {
+private fun StatusHero(
+    running: Boolean,
+    alerting: Int,
+    suspicious: Int,
+    scanFault: String?,
+    locationFault: String?,
+    recentAlert: AlertEntity?
+) {
     data class Look(val title: String, val subtitle: String, val icon: ImageVector, val color: Color)
 
     val look = when {
@@ -296,16 +314,30 @@ private fun StatusHero(running: Boolean, alerting: Int, suspicious: Int, scanFau
             if (alerting == 1) "A tracker is following you" else "$alerting trackers following you",
             "Moving with you across places and time.", Icons.Filled.Warning, VigilRed
         )
+        // An alert outlives its tracker row: a rotating clone never has one, and an
+        // alerted tag leaves the Active list after 10 min. Without this the card went
+        // green the moment someone opened the app from the alert notification.
+        recentAlert != null -> Look(
+            if (recentAlert.trackerId == TrackerRepository.CLONE_TRACKER_ID) "Possible hidden tracker" else "Tracker alert",
+            "${recentAlert.label} flagged ${relative(recentAlert.timestamp)}. See Alert history.",
+            Icons.Filled.Warning, VigilRed
+        )
         // A dead scan must never read as safety. This case used to be invisible, so
         // the app showed "You're clear" while it had stopped listening entirely.
         scanFault != null -> Look(
             "Not watching", scanFault, Icons.Filled.BluetoothDisabled, VigilPeach
         )
+        // Same for location: with no fix nothing can alert, so quiet means nothing.
+        locationFault != null -> Look(
+            "Location needed", locationFault, Icons.Filled.LocationOff, VigilPeach
+        )
         suspicious > 0 -> Look(
             "Keeping watch",
             "$suspicious possible follower(s) — not yet confirmed.", Icons.Filled.GppMaybe, VigilPeach
         )
-        else -> Look("You're clear", "Nothing has been following you.", Icons.Filled.CheckCircle, VigilGreen)
+        // Says what VIGIL observed, not that nothing is there: rotation in the gap,
+        // duty-cycled clones and tags that never report "separated" all stay quiet.
+        else -> Look("All quiet", "No tracker seen moving with you.", Icons.Filled.CheckCircle, VigilGreen)
     }
 
     Card(
@@ -405,7 +437,7 @@ private fun TrackerCard(
             Column(Modifier.weight(1f)) {
                 Text(ecosystemDisplay(t.ecosystem), fontWeight = FontWeight.SemiBold)
                 Text(
-                    "${statusLabel(status)} · ${t.distinctPlaces} places · ${t.lastRssi} dBm · ${relative(t.lastSeen)}",
+                    "${statusLabel(status)} · ${t.distinctPlaces} ${if (t.distinctPlaces == 1) "place" else "places"} · ${t.lastRssi} dBm · ${relative(t.lastSeen)}",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -457,7 +489,7 @@ private fun TrackerDetail(
         DetailRow("Signal (last / peak)", "${t.lastRssi} / ${t.peakRssi} dBm")
         DetailRow("Distinct places", t.distinctPlaces.toString())
         DetailRow("Co-movement sightings", t.effectiveSightings.toString())
-        DetailRow("Adverts logged", t.sightingCount.toString())
+        DetailRow("Sightings logged", t.sightingCount.toString())
         DetailRow("First seen", relative(t.firstSeen))
         DetailRow("Last seen", relative(t.lastSeen))
         if (t.anchorDayCount > 0) {
@@ -475,7 +507,7 @@ private fun TrackerDetail(
         val trail by produceState(initialValue = emptyList<TrailPoint>(), t.stableId) { value = loadTrail(t.stableId) }
         if (trail.size >= 2) {
             Spacer(Modifier.height(18.dp))
-            Text("Where it's moved with you", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
+            Text("Where it was seen", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
             Spacer(Modifier.height(8.dp))
             TrailView(
                 trail,
@@ -483,7 +515,7 @@ private fun TrackerDetail(
                     .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
             )
             Text(
-                "A schematic of the ${trail.size} points it was seen — not a real map. Use Export for that.",
+                "A schematic of the ${trail.size} points it was seen — not a real map.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(top = 6.dp)
@@ -554,11 +586,22 @@ private fun FinderScreen(t: TrackerEntity, onRing: (TrackerEntity) -> Unit, onCl
     // Intercept system back so it closes the finder instead of exiting the app.
     BackHandler(onBack = onClose)
     val rssi by ScanService.finderRssi.collectAsState()
+    val heardAt by ScanService.finderHeardAt.collectAsState()
     val smoothed = remember { mutableStateOf(-100f) }
-    LaunchedEffect(rssi) { rssi?.let { smoothed.value = 0.35f * it + 0.65f * smoothed.value } }
-    val hasSignal = rssi != null
-    val p = ((smoothed.value + 100f) / 60f).coerceIn(0f, 1f)  // -100 dBm..-40 dBm -> 0..1
+    LaunchedEffect(rssi, heardAt) { rssi?.let { smoothed.value = 0.35f * it + 0.65f * smoothed.value } }
+    // Re-check freshness every second: a tag that goes quiet, rotates its ID or
+    // drops out of range sends nothing, so nothing else would clear the reading.
+    val nowElapsed by produceState(SystemClock.elapsedRealtime()) {
+        while (true) {
+            value = SystemClock.elapsedRealtime()
+            delay(1_000)
+        }
+    }
+    val lost = rssi != null && nowElapsed - heardAt > FINDER_SILENCE_MS
+    val hasSignal = rssi != null && !lost
+    val p = if (hasSignal) ((smoothed.value + 100f) / 60f).coerceIn(0f, 1f) else 0f  // -100 dBm..-40 dBm -> 0..1
     val label = when {
+        lost -> "Signal lost — keep moving"
         !hasSignal -> "Searching… walk around"
         p > 0.8f -> "Right here"
         p > 0.6f -> "Very close"
@@ -600,7 +643,11 @@ private fun FinderScreen(t: TrackerEntity, onRing: (TrackerEntity) -> Unit, onCl
                 color = if (hasSignal) color else MaterialTheme.colorScheme.onSurfaceVariant
             )
             Text(
-                if (hasSignal) "$rssi dBm" else "no signal yet",
+                when {
+                    hasSignal -> "$rssi dBm"
+                    lost -> "nothing heard for ${FINDER_SILENCE_MS / 1000} s"
+                    else -> "no signal yet"
+                },
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
             Spacer(Modifier.height(40.dp))
@@ -656,6 +703,9 @@ private fun TrailView(points: List<TrailPoint>, modifier: Modifier = Modifier) {
 // ---- pure helpers ----------------------------------------------------------
 
 private const val ACTIVE_WINDOW_MS = 10 * 60_000L  // trackers not seen this recently drop off "Active"
+// Keep an alert on the hero for as long as VIGIL won't re-notify about the same device.
+private const val RECENT_ALERT_MS = CoMovementEvaluator.ALERT_COOLDOWN_MS
+private const val FINDER_SILENCE_MS = 10_000L       // finder reading counts as lost after this
 
 private fun isTrusted(t: TrackerEntity) = t.approved || t.baselineSafe
 
@@ -692,18 +742,18 @@ private fun statusIcon(s: TrackerStatus): ImageVector = when (s) {
 
 private fun statusLabel(s: TrackerStatus): String = when (s) {
     TrackerStatus.SAFE_APPROVED -> "Approved (yours)"
-    TrackerStatus.SAFE_BASELINE -> "Known (around home)"
+    TrackerStatus.SAFE_BASELINE -> "Known (usual places)"
     TrackerStatus.ALERTING -> "Following you"
     TrackerStatus.SUSPICIOUS -> "Watching"
     TrackerStatus.OBSERVED -> "Seen nearby"
 }
 
 private fun explanation(s: TrackerStatus): String = when (s) {
-    TrackerStatus.ALERTING -> "This tracker has been close to you across several distinct places over a sustained window — the signature of something travelling with you. If it isn't yours, treat it seriously."
-    TrackerStatus.SUSPICIOUS -> "Seen repeatedly and close, but not yet across enough places/time to confirm it's following you. VIGIL keeps watching."
-    TrackerStatus.OBSERVED -> "Seen nearby but with no co-movement pattern — most likely ambient."
-    TrackerStatus.SAFE_APPROVED -> "You marked this as yours, so VIGIL won't alert on it."
-    TrackerStatus.SAFE_BASELINE -> "Regularly around the places you live — learned as part of your normal environment, entirely on-device."
+    TrackerStatus.ALERTING -> "This tracker has been heard near you at several distinct places over a sustained window — the pattern of something travelling with you. If it isn't yours, treat it seriously."
+    TrackerStatus.SUSPICIOUS -> "Heard near you repeatedly, but not yet across enough places and time to say it's following you. VIGIL keeps watching."
+    TrackerStatus.OBSERVED -> "Heard nearby, but not moving with you while away from its owner — most likely ambient."
+    TrackerStatus.SAFE_APPROVED -> "You marked this as yours, so VIGIL won't alert on this ID. Trackers other than Tile change ID at least daily, so yours may reappear as new."
+    TrackerStatus.SAFE_BASELINE -> "Heard on 3+ days at places where you spend a lot of time, without moving with you — learned on-device."
 }
 
 private fun ecosystemDisplay(name: String): String =

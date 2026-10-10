@@ -38,14 +38,15 @@ import kotlin.coroutines.resume
  * the vendor app instead.
  *
  * Nothing here claims "ringing" from a write ACK or from the mere arrival of a reply:
- * an AirTag confirms by self-disconnecting with status 19, and a DULT reply is parsed
- * by [RingReplyParser] so a refusal is reported as one.
+ * a DULT reply is parsed by [RingReplyParser] so a refusal is reported as one. An
+ * AirTag sends no reply at all; it closes the link itself (status 19) when the sound
+ * is done, which is also how AirGuard detects completion (AppleFindMy.kt, v3.1.0).
  */
 object TrackerRinger {
 
     private const val TAG = "TrackerRinger"
     private const val TIMEOUT_MS = 15_000L
-    private const val STATUS_PEER_DISCONNECT = 19  // GATT_CONN_TERMINATE_PEER_USER — AirTag "done ringing"
+    private const val STATUS_PEER_DISCONNECT = 19  // GATT_CONN_TERMINATE_PEER_USER — AirTag's "sound done"
 
     private data class Proto(
         val name: String,
@@ -116,12 +117,13 @@ object TrackerRinger {
                         BluetoothProfile.STATE_CONNECTED -> g.discoverServices()
                         BluetoothProfile.STATE_DISCONNECTED -> {
                             handler.removeCallbacksAndMessages(null)
-                            // An AirTag self-disconnects (status 19) once it has started ringing.
+                            // An AirTag hangs up (status 19) after playing its sound, so by
+                            // now the sound may already be over. Say what was observed.
                             if (cont.isActive) {
                                 cont.resume(
                                     if (selected == AIRTAG && status == STATUS_PEER_DISCONNECT)
-                                        "Ringing - listen for the AirTag."
-                                    else "Tracker disconnected before it could ring."
+                                        "The AirTag hung up, which it does after playing its sound. Didn't hear it? Move closer and try again."
+                                    else "The connection dropped before the tracker confirmed anything."
                                 )
                             }
                             g.close()
@@ -159,11 +161,16 @@ object TrackerRinger {
                     if (!cont.isActive) return
                     // Status FIRST. The AirTag branch used to return ahead of this check,
                     // so a write the tracker rejected still reported "Ringing".
-                    if (status != BluetoothGatt.GATT_SUCCESS) { finish("The tracker refused the ring command.", g); return }
-                    // Every protocol here confirms out-of-band: an AirTag self-disconnects
-                    // with status 19 once it is actually ringing, DULT/FindMy send an
-                    // indication. A write ACK only means the command was accepted, so wait
-                    // for the real confirmation and fall back to saying exactly that.
+                    // A failed write may be the tag rejecting it or a local stack error
+                    // (e.g. 133); either way nothing rang, and we can't say who refused.
+                    if (status != BluetoothGatt.GATT_SUCCESS) {
+                        finish("The ring command didn't go through (status $status). Tags only ring while away from their owner.", g)
+                        return
+                    }
+                    // Every protocol here confirms out-of-band: an AirTag hangs up with
+                    // status 19 after playing its sound, DULT/FindMy send an indication.
+                    // A write ACK only means the command was accepted, so wait for the
+                    // real confirmation and fall back to saying exactly that.
                     val isAirTag = selected == AIRTAG
                     handler.postDelayed({
                         finish(

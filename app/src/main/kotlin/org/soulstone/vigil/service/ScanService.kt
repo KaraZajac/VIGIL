@@ -11,6 +11,7 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.ServiceInfo
 import android.os.Build
+import android.os.SystemClock
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
@@ -25,6 +26,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import org.soulstone.vigil.MainActivity
 import org.soulstone.vigil.R
@@ -57,6 +59,7 @@ class ScanService : LifecycleService() {
         private const val MIN_RECORD_INTERVAL_MS = 15_000L  // per-device DB throttle
         private const val MAX_THROTTLE_ENTRIES = 4096
         private const val PLACE_TICK_MS = 5 * 60_000L       // dwell accrual for the baseline
+        private const val LOCATION_GRACE_MS = 30_000L       // ride out brief "no fix" blips
         private const val ALERT_CHANNEL_ID = "vigil_alerts"
         private const val ALERT_NOTIF_ID = 0x5162
         private const val CLONE_NOTIF_ID = 0x5163
@@ -76,14 +79,28 @@ class ScanService : LifecycleService() {
         private val _scanFault = MutableStateFlow<String?>(null)
         val scanFault: StateFlow<String?> = _scanFault.asStateFlow()
 
+        /**
+         * Non-null while listening works but no location fix is available. Every
+         * alert needs places or movement, so without a fix nothing can alert, and the
+         * UI must not read "all quiet" in that state either.
+         */
+        private val _locationFault = MutableStateFlow<String?>(null)
+        val locationFault: StateFlow<String?> = _locationFault.asStateFlow()
+
         // Live RSSI stream for the "find it" hot/cold screen. The UI sets a target
         // stableId; every matching advert (not the throttled DB path) updates this.
         @Volatile private var finderTarget: String? = null
         private val _finderRssi = MutableStateFlow<Int?>(null)
         val finderRssi: StateFlow<Int?> = _finderRssi.asStateFlow()
+        // When the target was last heard (elapsedRealtime). A StateFlow of RSSI alone
+        // can't show silence: the finder kept "Very close" up indefinitely after the
+        // tag went quiet, rotated its ID, or scanning stopped.
+        private val _finderHeardAt = MutableStateFlow(0L)
+        val finderHeardAt: StateFlow<Long> = _finderHeardAt.asStateFlow()
         fun setFinderTarget(id: String?) {
             finderTarget = id
             _finderRssi.value = null
+            _finderHeardAt.value = 0L
         }
 
         fun start(context: Context) {
@@ -109,6 +126,7 @@ class ScanService : LifecycleService() {
     @Volatile private var lastCloneAlertMs = 0L
     private var pruneJob: Job? = null
     private var placeJob: Job? = null
+    private var locationJob: Job? = null
     private var btReceiverRegistered = false
 
     override fun onCreate() {
@@ -144,6 +162,19 @@ class ScanService : LifecycleService() {
         }
         _running.value = true
         _scanFault.value = null
+        locationJob?.cancel()
+        locationJob = lifecycleScope.launch {
+            location.available.collectLatest { ok ->
+                if (ok) {
+                    setLocationFault(null)
+                } else {
+                    // The fused provider can report "unavailable" briefly while it
+                    // reacquires; only surface it once it has persisted.
+                    delay(LOCATION_GRACE_MS)
+                    setLocationFault("No location fix, so VIGIL can't tell what moves with you. Check that Location is on.")
+                }
+            }
+        }
         pruneJob?.cancel()
         pruneJob = lifecycleScope.launch {
             // The clone cooldown lives in memory, so a service restart used to re-arm
@@ -164,7 +195,7 @@ class ScanService : LifecycleService() {
             // noted when a sighting arrived, so a tracker-free home never became an
             // anchor and household tags were never auto-trusted.
             while (true) {
-                location.location.value?.let { fix ->
+                currentFix()?.let { fix ->
                     runCatching { repo.notePlace(fix.latitude, fix.longitude) }
                         .onFailure { Log.w(TAG, "notePlace failed: ${it.message}") }
                 }
@@ -183,16 +214,30 @@ class ScanService : LifecycleService() {
     private fun setFault(reason: String?) {
         if (_scanFault.value == reason) return
         _scanFault.value = reason
+        refreshOngoingNotification()
+    }
+
+    private fun setLocationFault(reason: String?) {
+        if (_locationFault.value == reason) return
+        _locationFault.value = reason
+        refreshOngoingNotification()
+    }
+
+    /** The ongoing notification is the only surface visible with the app closed, so
+     *  it has to carry the bad news too. A dead scan outranks a missing fix. */
+    private fun refreshOngoingNotification() {
         if (!_running.value) return
-        // The ongoing notification is the only surface visible with the app closed,
-        // so it has to carry the bad news too.
         val n = buildNotification(
             title = getString(R.string.app_name),
-            text = reason ?: getString(R.string.notification_text),
+            text = _scanFault.value ?: _locationFault.value ?: getString(R.string.notification_text),
             high = false
         )
         runCatching { getSystemService(NotificationManager::class.java)?.notify(NOTIFICATION_ID, n) }
     }
+
+    /** The latest fix, but only while the provider says it is current. A stale fix
+     *  would pin every new sighting to wherever the phone last had location. */
+    private fun currentFix() = location.location.value?.takeIf { location.available.value }
 
     /** Re-arm the scan after Bluetooth comes back, or record why it still can't run. */
     private fun tryResumeScan() {
@@ -235,10 +280,13 @@ class ScanService : LifecycleService() {
     }
 
     private fun onObservation(obs: TrackerObservation) {
-        val fix = location.location.value
+        val fix = currentFix()
 
         // Live RSSI for the "find it" screen — every advert, ahead of any throttle.
-        if (obs.stableId == finderTarget) _finderRssi.value = obs.rssi
+        if (obs.stableId == finderTarget) {
+            _finderRssi.value = obs.rssi
+            _finderHeardAt.value = SystemClock.elapsedRealtime()
+        }
 
         // Rotation-clone presence engine (problem #1) — fed synchronously so its
         // streaming state stays ordered. Only a CONFIRMED verdict raises a user
@@ -297,6 +345,8 @@ class ScanService : LifecycleService() {
         // the location updates and foreground notification are released, not leaked.
         _running.value = false
         _scanFault.value = null
+        _locationFault.value = null
+        locationJob?.cancel(); locationJob = null
         unregisterBluetoothReceiver()
         scanner.stop()
         location.stop()

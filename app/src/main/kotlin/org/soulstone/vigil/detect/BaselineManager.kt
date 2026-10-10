@@ -5,12 +5,15 @@ import org.soulstone.vigil.data.db.PlaceEntity
 
 /**
  * Learns the user's "safe" RF world so it doesn't cry wolf about the trackers that
- * live where they live — their own AirTag, a partner's Tile, a housemate's tag.
+ * live where they live.
  *
- * v1 heuristic (offline, on-device): count location-tagged sightings per geohash-6
- * cell; once a cell crosses [ANCHOR_MIN_VISITS] it's an "anchor" (home/work). A
- * tracker seen at an anchor on ≥ [BASELINE_MIN_DAYS] distinct days is marked
- * baseline-safe by the repository and excluded from alerting.
+ * v1 heuristic (offline, on-device): the scan service notes the user's own location
+ * every few minutes; a geohash-6 cell that accrues [ANCHOR_MIN_VISITS] dwell visits
+ * becomes an "anchor" (home, work, anywhere they spend time). A tracker seen at an
+ * anchor on ≥ [BASELINE_MIN_DAYS] distinct days, while not co-moving, is marked
+ * baseline-safe by the repository and excluded from alerting. Trust is per identity,
+ * and every ecosystem except Tile rotates its identity at least daily, so in practice
+ * only Tiles can be learned this way.
  *
  * This visit-count proxy is intentionally simple; the roadmap replaces it with
  * proper stay-point / dwell detection (200 m / 20 min clusters).

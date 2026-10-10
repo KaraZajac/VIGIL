@@ -7,7 +7,8 @@ import org.soulstone.vigil.model.TrackerEcosystem
 
 /**
  * The temporal co-movement test — VIGIL's core question: has this tracker been at
- * enough of *my* distinct places, over enough time, while actually close to me?
+ * enough of *my* distinct places, over enough time, and come at least moderately
+ * near me at least once?
  *
  * Thresholds are adapted from AirGuard's field-tuned model (≥3 sightings, N
  * distinct locations, T minutes) with one deliberate addition AirGuard omits: an
@@ -15,11 +16,11 @@ import org.soulstone.vigil.model.TrackerEcosystem
  * It is coarse — −85 dBm at the default is reachable from tens of metres — so it
  * only rejects tags that never came even moderately near. "A Tile in a car beside
  * you at two red lights" is rejected by the 15-minute debounce below, not by this
- * gate. See research brief §3.5 / §4.
+ * gate. See paper §4.2.
  *
- * This is the honest, shippable v1. The rotation-robust "detect the attack, not
- * the device" layer (problem #1) is being designed separately and slots in as an
- * additional signal, not a replacement.
+ * This is the identity path. Rotating-ID clones are the job of [PresenceEngine],
+ * which runs alongside it as an additional signal, not a replacement. Neither path
+ * looks back further than [WINDOW_MS] or correlates across days.
  */
 object CoMovementEvaluator {
 
