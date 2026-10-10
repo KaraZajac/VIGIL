@@ -96,7 +96,21 @@ class PresenceEngine {
         lastTs = ts; lastId = id
         if (lat != null && lon != null) {
             cells.add(Geohash.encode(lat, lon, 7))
-            if (haveStart) netMeters = haversineMeters(startLat, startLon, lat, lon)
+            if (haveStart) {
+                netMeters = haversineMeters(startLat, startLon, lat, lon)
+            } else {
+                // Latch the origin on the FIRST fix of the run, not only at its start.
+                // The scanner delivers adverts immediately while the fused provider
+                // needs seconds to produce a fix, so a run almost always begins with
+                // no location. Anchoring only in startRun() left haveStart false for
+                // the life of the run, pinning netMeters at 0 — and because a clone's
+                // presence run is continuous, nothing ever restarted it. The
+                // co-movement gate could then never pass and the engine sat silently
+                // at WATCHING for the whole session, disabling clone detection
+                // entirely. Latching late costs a little displacement, which is the
+                // safe direction to err.
+                startLat = lat; startLon = lon; haveStart = true
+            }
         }
         return verdict()
     }
@@ -105,9 +119,10 @@ class PresenceEngine {
         active = true; startTs = ts; lastTs = ts; lastId = id
         ewmaRssi = rssi.toDouble(); ewmaAbsResid = 0.0; seamlessNovel = 0
         cells.clear(); netMeters = 0.0
+        haveStart = false
         if (lat != null && lon != null) {
             startLat = lat; startLon = lon; haveStart = true; cells.add(Geohash.encode(lat, lon, 7))
-        } else haveStart = false
+        }
     }
 
     private fun endRun() {
