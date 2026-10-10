@@ -1,24 +1,27 @@
 # VIGIL: On-Device Temporal Detection of Personal Location Trackers, Including Identity-Rotating Clones
 
 **Kara Zajac** · Black Flag Intel
-Draft v0.1 · 2026-07-15 · *working paper, accompanies the VIGIL reference implementation*
+Draft v0.2 · 2026-10-10 · *working paper, accompanies the VIGIL reference implementation*
 
 ---
 
 ## Abstract
 
 Consumer item-trackers — Apple AirTag, Tile, Samsung Galaxy SmartTag, and the
-Google Find My Device network — have become instruments of stalking: in a survey
-of intimate-partner-violence survivors, 44% of those stalked reported physical
-location tracking, with vehicles the most common hiding place. Every deployed
+Google Find My Device network — have become instruments of stalking: in an online
+survey of 5,253 people, recruited mostly through the AirGuard tracker-detection
+app, 44.28% of respondents who had been stalked reported location tracking — by
+Bluetooth tracker or other means — among the methods used against them, and cars
+were the most common hiding place for a misused tracker [3]. Every deployed
 countermeasure (Apple *Tracker Detect*, the iOS *Find My* and Android *Unknown
 Tracker* alerts, and the open-source *AirGuard*) shares a structural assumption:
 it **keys on a device identity** and alarms when the *same* identifier is seen
 repeatedly while moving with the victim. This assumption fails in two directions.
-It is *spatial* where the true signal is *temporal*; and it is defeated outright
-by identity-rotating clones — a commodity ESP32 firmware that cycles ~2,000 Find
-My keys (a fresh one every ~30 s) tracked a victim for five days while raising
-**zero** alerts on every tool tested.
+It uses the decisive temporal signal — recurrence across the victim's *changing*
+locations — only weakly; and it is defeated outright by identity-rotating clones —
+a commodity ESP32 firmware that cycles ~2,000 Find My keys (a fresh one every
+~30 s) tracked a victim for five days while raising **zero** alerts on every tool
+tested.
 
 We present **VIGIL**, an Android application that reframes the problem as
 *temporal co-movement*: not "is a tracker near me" but "has *the same* tracker
@@ -28,14 +31,17 @@ parses five BLE wire formats and gates alerts on an RSSI proximity test that
 prior tools omit, together with a learned, on-device *baseline* that auto-trusts
 the trackers that live where the user lives; and (2) an identity-agnostic
 **presence engine** that detects rotating-key clones by the one thing identity
-churn cannot hide — an unbroken, coherent, co-moving RF *presence* — and a
-**rotation-rate "squeeze"** argument showing that running an identity detector and
-a churn detector together leaves no rotation rate that evades both. VIGIL holds no
-network permission: the tracker database, the learned baseline, and all inference
-run and remain on the device. We describe the per-ecosystem detection methodology,
-the temporal model, the presence engine, the implementation, and a proposed
-evaluation, and we are explicit about the adaptive-adversary floor below which
-single-session on-device detection is information-theoretically impossible.
+churn cannot hide — an unbroken, coherent, co-moving RF *presence* — together
+with a **rotation-rate "squeeze"** design in which an identity detector and a churn
+detector leave no rotation rate that evades both. We are explicit that the shipped
+thresholds do not yet close that squeeze: in offline replay, rotation periods from
+about 85 seconds to about 45 minutes evade both detectors at the default
+sensitivity (§5.4). VIGIL holds no network permission: the tracker database, the
+learned baseline, and all inference run and remain on the device. We describe the
+per-ecosystem detection methodology, the temporal model, the presence engine, the
+implementation, and an evaluation plan with its synthetic results so far, and we
+are explicit about the adaptive-adversary floor below which single-session
+on-device detection is information-theoretically impossible.
 
 ---
 
@@ -82,10 +88,12 @@ temporal detector. Its contributions:
   auto-trusts trackers that recur there across days — the user's own AirTag, a
   partner's Tile — collapsing the dominant benign false-positive class without a
   server and without the user tagging anything.
-- **A presence engine for rotating clones.** VIGIL detects the attack class that
-  defeats every deployed tool, by abandoning identity tracking in favour of
-  identity-agnostic *presence continuity*, and we give a squeeze argument
-  (§5.4) that closes the evasion gap left by either detector alone.
+- **A presence engine for rotating clones.** VIGIL targets the attack class that
+  defeats every deployed tool by abandoning identity tracking in favour of
+  identity-agnostic *presence continuity*; in offline replay it confirms the
+  published *Find You* configuration in about six minutes (§7). We give a squeeze
+  argument (§5.4) for closing the evasion gap left by either detector alone, and
+  measure the gap the shipped thresholds still leave.
 - **A privacy architecture with no network.** VIGIL requests no `INTERNET`
   permission. There is no server, no account, and no telemetry.
 
@@ -337,16 +345,18 @@ ambient source.
 
 ### 5.4 The pipeline and the squeeze
 
-A three-stage streaming pipeline (all O(1)-ish per sighting, on-device): a **CUSUM
-change-point** on `λ_novel` versus a rolling personal baseline *triggers* an
-identity-agnostic **presence-track confirmer** (counting seamless novel handovers
-and RSSI coherence), which alarms only behind a hard **co-movement gate** (net
-displacement ≥ 500 m across ≥ 3 cells while moving).
+The designed pipeline has three streaming stages (all O(1)-ish per sighting,
+on-device): a **CUSUM change-point** on `λ_novel` versus a rolling personal
+baseline *triggers* an identity-agnostic **presence-track confirmer** (counting
+seamless novel handovers and RSSI coherence), which alarms only behind a hard
+**co-movement gate** (net displacement ≥ 500 m across ≥ 3 cells while moving).
+The shipped v1 replaces the CUSUM trigger with a fixed gate: a presence run must
+contain at least 12 seamless novel handovers at a sustained rate of at least 0.7
+per minute.
 
-The robustness argument is the **rotation-rate squeeze.** VIGIL runs the classic
-identity detector (which catches any identity persisting > ~3–5 min) *and* the
-churn detector (which catches sustained novel-churn above ~0.5–1/min)
-simultaneously:
+The robustness argument is the **rotation-rate squeeze.** Run an identity detector
+and a churn detector together; if the identity path catches every identity held
+longer than the churn path's slowest rotation, no rotation period evades both:
 
 ```
 rotation period:  30 s ─── 2 min ─── 5 min ──────────── 24 h
@@ -355,11 +365,32 @@ rotation period:  30 s ─── 2 min ─── 5 min ────────�
                                 └────── identity path catches ──────┘
 ```
 
-**No rotation period evades both.** Fast rotation is caught by churn; slow rotation
-by identity; the middle by both. Moreover the presence-continuity path is
-rotation-*rate*-agnostic — slowing rotation lowers `λ_novel` but does nothing to
-the unbroken coherent co-moving track. The adversary's only real lever is
-*continuity*, not rate.
+**That is the squeeze as designed. As shipped, it does not close.** Each path's
+reach is set by its thresholds, and the offline replay harness (§7) measures both
+by sweeping the rotation period of a carried clone:
+
+| Sensitivity | Churn path catches | Identity path catches | Evades both |
+|---|---|---|---|
+| High | rotation ≤ ~85 s | identity held ≥ ~30 min | ~85 s to 30 min |
+| Medium (default) | rotation ≤ ~85 s | identity held ≥ ~45 min | ~85 s to 45 min |
+| Low | rotation ≤ ~85 s | identity held ≥ ~90 min | ~85 s to 90 min |
+
+The churn ceiling is the v1 rate gate: 0.7 seamless novel handovers per minute is
+one rotation every ~86 s. The identity floor is the co-movement test of §4.2:
+three sightings, de-duplicated to one per 15 minutes, spanning the sensitivity's
+minimum time, so a single identity must survive that whole span. The original
+argument assumed an identity detector catches any key held longer than ~3–5 min.
+Neither VIGIL nor AirGuard does: AirGuard's risk evaluator requires a device to
+have been tracked for 30, 60 or 120 minutes, by sensitivity, before it alarms [2].
+An adversary who rotates every few minutes — still hundreds of times faster than
+the 24 h rotation the specifications mandate — evades both of VIGIL's detectors
+today.
+
+Closing the gap is open work. The design's answer is a presence-continuity path
+that is rotation-*rate*-agnostic: slowing rotation lowers `λ_novel` but does
+nothing to an unbroken, coherent, co-moving close-band track. v1 does not have that
+path, because its rate gate deliberately limits the clone alarm to impossible
+churn; any replacement must be scored against the false-positive budget of §7.
 
 ### 5.5 False positives
 
@@ -420,26 +451,39 @@ connects to a tracker on the detection path.
 
 ---
 
-## 7. Proposed evaluation
+## 7. Evaluation
 
-VIGIL is a prototype; the following methodology is specified but **not yet
-executed**, and no detection-rate claims are made here.
+VIGIL is a prototype. **No field evaluation has been run**, so no real-world
+detection-rate claims are made here. What exists is the offline half of the
+methodology below: a record/replay harness, run today on synthetic traces.
 
-- **Red-team emitter.** A parameterised OpenHaystack/*Find You* ESP32 clone with
+- **Red-team emitter.** A parameterised OpenHaystack/*Find You* clone with
   sweepable rotation period (30 s … 24 h), TX-power variance, and duty cycle. Carried,
   it is a real co-moving emitter — ground-truth positive without endangering anyone.
+  A Flipper Zero implementation ships in `flipper/vigil_emitter/`; its keys are
+  random and never registered, so it cannot report a location to anyone.
 - **Ambient baselines.** Raw sighting logs across environment classes (rural drive,
   suburban, dense-urban walk, bus, rush-hour subway, highway, apartment block,
   crowd), each with paired emitter-on/off runs.
-- **Record/replay harness.** The presence engine is a pure
-  `List<Sighting> → List<ScoredEvent>` function; ambient logs are recorded once and
-  replayed to tune thresholds deterministically and offline in Kotlin, and
-  attack-in-context scenarios are synthesised by merging clean and emitter-only
-  traces.
+- **Record/replay harness.** Implemented in
+  `app/src/test/kotlin/org/soulstone/vigil/eval/`. It replays a trace through both detection paths exactly as the app wires them,
+  and is deterministic, so a threshold change shows up immediately. Ambient logs
+  are meant to be recorded once and replayed; attack-in-context scenarios are
+  synthesised by merging clean and emitter-only traces.
 - **Metrics.** True-positive rate at a fixed false-positive budget (headline:
   TPR at ≤ 1 FP per active-carry-day, per class); detection latency
   (attach → first alert); ROC/AUC; robustness curves versus rotation period, TX
   power, and duty cycle; and ablations isolating each discriminator.
+
+**Synthetic results so far.** The traces come from a log-distance path-loss model
+with seeded noise, not from captures, so these numbers validate the detection logic
+end to end and say nothing yet about real RF. The published *Find You*
+configuration (a new key every 30 s, full duty, carried while walking) is confirmed
+by the presence engine in about 6 minutes, while the identity path stays blind to
+it. No alert fires in synthetic dense-urban, at-home, or rush-hour-transit ambient
+traces. Two weaknesses are measured: the squeeze gap of §5.4, and duty cycling —
+a clone emitting for 30 s and then silent for 30 s is never detected, because each
+silence longer than 20 s ends the presence run.
 
 ---
 
@@ -448,13 +492,13 @@ executed**, and no detection-rate claims are made here.
 | Capability | Apple Tracker Detect | iOS / Android built-in | AirGuard | **VIGIL** |
 |---|---|---|---|---|
 | Cross-ecosystem | Find My only | AirTag + FMDN + DULT partners (not Tile) | yes | yes |
-| Background / automatic | no (manual scan) | yes | yes | yes |
+| Background / automatic | no (manual scan) | yes | yes | once started (not after reboot) |
 | Fully on-device / no account | yes | yes | yes | **yes (no network permission)** |
 | RSSI proximity gate on alerts | no | undisclosed | **no** | **yes** |
 | Learned baseline (auto-trust) | no | no | manual ignore only | **yes** |
-| Detects rotating-key clones | no | no | no | **designed (§5)** |
+| Detects rotating-key clones | no | no | no | **fast rotation only (≤ ~85 s); v1, simulated (§5.4, §7)** |
 | Covers Tile anti-theft | no | no | yes (static MAC) | yes |
-| Survivor-grade evidence export | no | no | limited | roadmap |
+| Survivor-grade evidence export | no | no | limited | basic (text report + GPX) |
 
 Cross-ecosystem, offline operation, and temporal co-movement are *not* novel —
 AirGuard has them. VIGIL differentiates on the pieces AirGuard's architecture
@@ -489,7 +533,12 @@ advice must be given with situational-safety caveats.
 - **Background scan latency** is bounded by Android's ~15-min background floor
   absent a persistent foreground service; motion-triggered scanning (roadmap)
   reduces it.
-- **Not yet evaluated.** §7 is a plan, not a result.
+- **Squeeze gap (§5.4).** Rotation periods from ~85 s up to the identity path's
+  minimum span (30, 45 or 90 min by sensitivity) evade both detectors in v1.
+- **Duty cycling (§7).** Silences longer than 20 s reset the presence run, so an
+  intermittently transmitting clone is not detected; the reacquire rule of the
+  design document is not yet implemented.
+- **Not yet field-evaluated.** §7's results are synthetic.
 
 ---
 
@@ -516,14 +565,16 @@ contact-tracing designs (DP-3T; Google/Apple Exposure Notification).
 
 ## 12. Conclusion
 
-The anti-stalking detectors people rely on are spatial where the threat is
-temporal, and identity-bound where the adversary can rotate identities. VIGIL
+The anti-stalking detectors people rely on use the temporal signal only weakly,
+and are identity-bound where the adversary can rotate identities. VIGIL
 reframes detection as temporal co-movement, adds the proximity gate and learned
 baseline that make that reframing practical on-device and private, and introduces
 a presence engine that detects the rotating-key clone by the one property it cannot
-hide. The rotation-rate squeeze shows the combination leaves no safe rotation rate;
-the honest floor shows where even this stops. We release VIGIL as a working
-prototype and an open design, and invite the empirical evaluation §7 lays out.
+hide. The rotation-rate squeeze shows how the combination could leave no safe
+rotation rate; our own measurements show the shipped thresholds do not yet achieve
+it, and the honest floor shows where even the full design stops. We release VIGIL
+as a working prototype and an open design under the BSD 3-Clause license, and
+invite the field evaluation §7 lays out.
 
 ---
 

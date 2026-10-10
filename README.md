@@ -115,11 +115,22 @@ clone is one physical radio holding an unbroken, close-range, co-moving RF
 *presence* even as its identity churns thousands of times faster than any
 standards-compliant tracker is allowed to. The full algorithm — a CUSUM churn
 trigger, an identity-agnostic presence-track confirmer, and a co-movement gate,
-plus the "identity-path × churn-path squeeze" that leaves no safe rotation rate —
-is designed in **[docs/detection-rotation-clone.md](docs/detection-rotation-clone.md)**.
-It's now implemented as a first version in `detect/PresenceEngine.kt` (unit-tested
-against synthetic clone/ambient traces) and wired into the scan service to raise a
-distinct rotating-tracker alert; field-tuning against real captures is what remains.
+plus the "identity-path × churn-path squeeze" meant to leave no safe rotation
+rate — is designed in **[docs/detection-rotation-clone.md](docs/detection-rotation-clone.md)**.
+A first version is implemented in `detect/PresenceEngine.kt` and wired into the
+scan service to raise a distinct rotating-tracker alert.
+
+**What it catches today**, measured in an offline replay harness on synthetic
+traces (`app/src/test/kotlin/org/soulstone/vigil/eval/`): the published *Find You*
+configuration, a new key every 30 s, is confirmed in about 6 minutes of walking,
+with no alert in dense-urban, at-home or rush-hour-transit ambient traces.
+
+**What it doesn't:** the squeeze is not closed by the shipped thresholds. A tracker
+that rotates every ~85 seconds to ~45 minutes evades both detectors at the default
+sensitivity (to 30 min on High, 90 min on Low), and a clone that goes silent for
+30 s at a time is never detected. Both are open work, and none of these results has
+been checked against real RF yet — the Flipper Zero emitter in
+[`flipper/vigil_emitter/`](flipper/vigil_emitter/) exists to do that.
 
 ## Architecture
 
@@ -162,9 +173,11 @@ an APK to a GitHub Release on `v*` tags.
 
 Prototype. In place: BLE scan + filters, per-ecosystem parsing, Room temporal
 store, co-movement evaluator with RSSI gate, allowlist, learned baseline, the
-rotation-clone presence engine (v1, unit-tested), foreground service, Compose UI.
-**Not yet:** field-tuning the clone engine on real captures, GATT play-sound /
-DULT get-identifier, and empirical validation. Before trusting the parser, capture real devices with nRF Connect —
+rotation-clone presence engine (v1, unit-tested), foreground service, Compose UI,
+"Make it ring" over GATT, and evidence export.
+**Not yet:** closing the squeeze gap and duty-cycle evasion described above,
+field-tuning the clone engine on real captures, DULT get-identifier, and empirical
+validation. Before trusting the parser, capture real devices with nRF Connect —
 the SmartTag2 offsets are inferred from gen-1, and the Tile/AirTag reversing is a
 couple of years old.
 

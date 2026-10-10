@@ -275,11 +275,14 @@
           A rotating clone is <em>one</em> physical radio holding an unbroken,
           close-range, co-moving RF presence — even as its identity churns
           thousands of times faster than any standards-compliant tracker is
-          allowed to. VIGIL's <code>PresenceEngine</code> pairs a CUSUM churn
-          trigger with an identity-agnostic presence-track confirmer and the
-          co-movement gate — an "identity-path × churn-path squeeze" that leaves
-          no safe rotation rate. First version implemented and unit-tested
-          against synthetic clone/ambient traces; field-tuning is what remains.
+          allowed to. VIGIL's <code>PresenceEngine</code> tracks that presence
+          instead of the identity: it counts seamless hand-overs to never-seen
+          identities and gates the alarm on co-movement. In offline replay it
+          confirms the published <em>Find You</em> setting in about six minutes.
+          It does not catch everything yet: a clone that rotates every ~85
+          seconds to ~45 minutes, or goes quiet for 30 s at a time, slips past
+          both of VIGIL's detectors today. Testing on real hardware is what
+          remains.
         </p>
         <a href="https://github.com/KaraZajac/VIGIL/blob/main/docs/detection-rotation-clone.md" class="audience-link" style="margin-top:.8rem;display:inline-block">Read the algorithm →</a>
       </div>

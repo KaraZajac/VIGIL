@@ -261,11 +261,11 @@ escalates only after a mode change or ≥ T_MIN beyond the transit segment.
 
 ## 4. Robustness
 
-### 4.1 The rotation-rate squeeze (the strongest claim)
+### 4.1 The rotation-rate squeeze (the design target — not yet met by v1)
 
-VIGIL runs the **identity path** (classic AirGuard-style; catches any key held
-> ~3–5 min, seen ≥3× across a location change) **and** the **churn path** (this
-doc; catches novel-seamless rates above ~0.5–1/min) together:
+The design runs the **identity path** (classic AirGuard-style; *assumed* to catch
+any key held > ~3–5 min, seen ≥3× across a location change) **and** the **churn
+path** (this doc; catches novel-seamless rates above ~0.5–1/min) together:
 
 ```
 rotation period:  30s ──── 2min ──── 5min ─────────── 24h
@@ -274,19 +274,37 @@ rotation period:  30s ──── 2min ──── 5min ───────�
                               └────── identity path ──────┘
 ```
 
-**No rotation period evades both.** Fast → churn path; slow → identity path;
-middle → both. Moreover the presence-continuity/co-movement path is
-rotation-rate-agnostic — slowing rotation lowers λ_novel but does nothing to the
-unbroken coherent co-moving close-band track. **The attacker's only real lever is
-continuity, not rate.**
+If both reaches held, no rotation period would evade both: fast → churn path;
+slow → identity path; middle → both.
+
+**Measured, they don't (2026-10).** The offline replay harness
+(`app/src/test/kotlin/org/soulstone/vigil/eval/`) sweeps the rotation period of a
+carried clone through both shipped paths:
+
+| Sensitivity | Churn path catches | Identity path catches | Evades both |
+|---|---|---|---|
+| High | rotation ≤ ~85 s | identity held ≥ ~30 min | ~85 s – 30 min |
+| Medium (default) | rotation ≤ ~85 s | identity held ≥ ~45 min | ~85 s – 45 min |
+| Low | rotation ≤ ~85 s | identity held ≥ ~90 min | ~85 s – 90 min |
+
+The identity-side premise was wrong. VIGIL's co-movement test needs three
+sightings de-duplicated to one per 15 min across the sensitivity's minimum span,
+so one identity must survive that whole span — and AirGuard is no different: its
+risk evaluator requires 30, 60 or 120 minutes of tracking by sensitivity. The churn
+ceiling is the v1 rate gate (`RHO_NOVEL_PER_MIN` = 0.7, one rotation per ~86 s).
+The presence-continuity path *as designed* is rotation-rate-agnostic — slowing
+rotation lowers λ_novel but does nothing to the unbroken coherent co-moving
+close-band track — but v1 gates presence on churn rate, so that path does not exist
+yet. Building it, and scoring it against the FP budget of §5, is how the squeeze
+gets closed.
 
 ### 4.2 Adaptations
 
 | Move | Effect | Response | Residual |
 |---|---|---|---|
-| Slower rotation | λ_novel drops | identity path re-engages | high (squeeze) |
+| Slower rotation | λ_novel drops | identity path re-engages only past its minimum span (§4.1) | **low in v1** — a few-minute rotation evades both paths (measured) |
 | Variable TX power | RSSI jitter weakens coherence | normalize by advertised txPower; lean on continuity+co-move+churn | med–high |
-| Intermittent duty-cycling | gaps reset runs | reacquire logic: a gap < G_reacq (3 min) resuming at coherent RSSI along your path = same presence; accumulate across gaps | medium (this is the biting attack) |
+| Intermittent duty-cycling | gaps reset runs | reacquire logic (designed, **not in v1**): a gap < G_reacq (3 min) resuming at coherent RSSI along your path = same presence; accumulate across gaps | **none in v1** — 30 s on / 30 s off is never detected (measured); medium once reacquire ships |
 | Blend into transit | crowd cover | mode-change gate (§3.3) | medium (needs latency) |
 
 ### 4.3 The true floor
@@ -333,8 +351,9 @@ honest caveats.**
 
 Real, not hype: the attack must maintain a continuous coherent co-moving presence
 to function; the standards mandate 24 h rotation, giving a *categorical* anomaly
-baseline; the identity×churn squeeze leaves no safe rate; and VIGIL strictly
-dominates incumbents on this attack (they raise zero alerts on Find You, VIGIL
+baseline; the identity×churn squeeze can leave no safe rate once both paths reach
+far enough (v1's do not yet — §4.1); and VIGIL strictly dominates incumbents on
+the published attack (they raise zero alerts on Find You; in offline replay VIGIL
 raises one). Research-grade long shots: robust low-FP detection in live rush-hour
 transit, and a patient low-duty-cycle adaptive attacker (provably forced to
 multi-session/days latency).
