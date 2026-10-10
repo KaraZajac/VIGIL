@@ -20,10 +20,11 @@ position to anyone. It is a detection target, not a functioning tracker.
 
 **Use it on yourself.** Carry it; don't attach it to another person or their
 property. One caution worth knowing: in **static** rotation mode it holds a single
-identity, which is precisely what other people's unwanted-tracking detectors
-(iOS Find My, Android's built-in, AirGuard) are built to notice — so a long static
-run in a crowd can raise alerts on strangers' phones. Prefer short static runs, or
-run them somewhere you aren't trailing other people around for an hour.
+identity for the whole run, duty-cycle silences included, which is precisely what
+other people's unwanted-tracking detectors (iOS Find My, Android's built-in,
+AirGuard) are built to notice — so a long static run in a crowd can raise alerts on
+strangers' phones. Prefer short static runs, or run them somewhere you aren't
+trailing other people around for an hour.
 
 ## Build & install
 
@@ -34,8 +35,8 @@ Needs the Flipper SDK. Either:
 cd flipper/vigil_emitter && ufbt && ufbt launch
 
 # or from a firmware tree
-ln -s "$PWD/flipper/vigil_emitter" ~/Projects/Moon-Firmware/applications_user/vigil_emitter
-cd ~/Projects/Moon-Firmware && ./fbt fap_vigil_emitter
+ln -s "$PWD/flipper/vigil_emitter" <firmware-tree>/applications_user/vigil_emitter
+cd <firmware-tree> && ./fbt fap_vigil_emitter
 ```
 
 Enable Bluetooth on the Flipper first (Settings → Bluetooth). The app shows
@@ -51,20 +52,31 @@ Enable Bluetooth on the Flipper first (Settings → Bluetooth). The app shows
 | Back | exit (always stops the beacon) |
 
 **Rotation** 30 s · 60 s · 90 s · 2 min · 5 min · 15 min · 45 min · static
-**Duty** 100% · 50% · 20% · 10% (a fixed 30 s emitting window plus computed silence)
-**TX power** 0 … −40 dBm
+**Duty** 100% · 50% · 20% · 10% (a fixed 30 s emitting window plus 30 / 120 / 270 s of silence)
+**TX power** 0 · −4 · −8.9 · −14 · −21 · −40 dBm, fixed for the run
 
-The rotation and duty options mirror `SimTraces.CloneConfig` in the offline harness
-(`app/src/test/kotlin/org/soulstone/vigil/eval/`), so a field run is directly
-comparable to a simulated one.
+Rotation and duty run on one clock from the start of the run, the way
+`SimTraces.CloneConfig` in the offline harness
+(`app/src/test/kotlin/org/soulstone/vigil/eval/`) models them: a key lasts one
+rotation period of wall time whether or not the radio is in a silent window, and
+resuming after silence keeps the same key unless a rotation boundary passed. So a
+field run is comparable to a simulated one, with two differences: the rotation list
+is a subset of the harness sweep, which also runs 30, 60, 90 and 120 min and 24 h,
+and the harness's per-advert TX-power jitter has no equivalent here. Changing any
+setting while emitting starts a new run: fresh key, clock and duty phase.
 
 ## Field protocol
 
-VIGIL's co-movement gate needs real displacement: **≥ 500 m net across ≥ 3
-geohash-7 cells** for the clone path, and ≥ 3 distinct cells over ≥ 45 min for the
-identity path. A test that doesn't leave the block will not alert, and that is
-correct behaviour, not a failure. So: start VIGIL watching, start the emitter, put
-the Flipper in a bag or pocket, and **walk**.
+VIGIL's co-movement gates need real displacement and signal. The clone path needs
+**≥ 500 m net across ≥ 3 geohash-7 cells** (~150 m) and only counts adverts at
+**≥ −65 dBm**. The identity path needs three sightings, counted at most once per
+15 min, across ≥ 3 cells over ≥ 45 min, with at least one advert reaching −85 dBm —
+that's Medium, the default; High needs 2 cells, 30 min and −90 dBm, Low 4 cells,
+90 min and −80 dBm. A test that doesn't leave the block will not alert, and that is
+correct behaviour, not a failure; neither is silence at the lowest TX-power
+settings, which can keep a pocketed Flipper below the clone path's −65 dBm band by
+design. So: start VIGIL watching, start the emitter, put the Flipper in a bag or
+pocket, and **walk**.
 
 The offline harness predicts the following, and each is worth confirming on real RF —
 the simulation models path loss and mobility, not antennas, bodies, or buildings:

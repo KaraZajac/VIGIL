@@ -18,8 +18,8 @@
  * Carry it yourself; see README.md before using it anywhere near other people.
  *
  * The two knobs are the two axes VIGIL's offline harness sweeps
- * (app/src/test/kotlin/org/soulstone/vigil/eval/), so a field run is directly
- * comparable to a simulated one:
+ * (app/src/test/kotlin/org/soulstone/vigil/eval/), on the same clock model, so a
+ * field run is comparable to a simulated one:
  *   - rotation period  30 s … static  (the rotation-rate squeeze, paper §5.4)
  *   - duty cycle       100% … 10%     (the duty-cycling adaptation, design doc §4.2)
  */
@@ -47,9 +47,11 @@ typedef struct {
     uint32_t ms;
 } RotationOption;
 
-/* Spans the squeeze: below ~85 s the churn path should catch it, above ~46 min the
- * identity path should, and the middle is the gap the harness measured. "static"
- * holds one identity for the whole run — a spec-compliant separated tag. */
+/* Spans the squeeze: below ~85 s the churn path should catch it; the identity path
+ * needs one key to outlast the sensitivity's span (30/45/90 min on High/Medium/Low;
+ * the harness has 45 min itself just missed at the default Medium), and the middle
+ * is the gap the harness measured. "static" holds one identity for the whole run,
+ * across duty-cycle silences too — a spec-compliant separated tag. */
 static const RotationOption ROTATIONS[] = {
     {"30 s", 30000UL},
     {"60 s", 60000UL},
@@ -117,12 +119,14 @@ typedef struct {
     bool fault; /* last radio call failed — usually Bluetooth disabled */
 
     uint32_t started_ms;
-    uint32_t last_rotate_ms;
+    uint32_t key_epoch; /* rotation periods since started_ms when the current key began */
     uint32_t keys_emitted;
 } VigilEmitter;
 
+/* 64-bit intermediate: ticks * 1000 in 32 bits wraps after ~71.6 min at 1 kHz, which
+ * forced an early rotation and jumped the duty phase and the on-screen timer. */
 static uint32_t now_ms(void) {
-    return furi_get_tick() * 1000UL / furi_kernel_get_tick_frequency();
+    return (uint32_t)((uint64_t)furi_get_tick() * 1000ULL / furi_kernel_get_tick_frequency());
 }
 
 static uint32_t duty_off_ms(const VigilEmitter* app) {
@@ -176,12 +180,11 @@ static void vigil_build_payload(VigilEmitter* app) {
     }
 }
 
-/* Roll a new identity and (re)start the beacon. set_config is refused while the
- * beacon runs, so every rotation is a stop/reconfigure/start cycle. */
-static bool vigil_rotate(VigilEmitter* app) {
+/* (Re)start the beacon with the current key. set_config is refused while the
+ * beacon runs, so every (re)start is a stop/reconfigure/start cycle. */
+static bool vigil_arm(VigilEmitter* app) {
     furi_hal_bt_extra_beacon_stop(); /* false when already stopped; not an error */
 
-    vigil_build_payload(app);
     app->config.min_adv_interval_ms = ADV_INTERVAL_MS;
     app->config.max_adv_interval_ms = ADV_INTERVAL_MS;
     app->config.adv_channel_map = GapAdvChannelMapAll;
@@ -200,8 +203,13 @@ static bool vigil_rotate(VigilEmitter* app) {
         FURI_LOG_E(TAG, "start failed (is Bluetooth enabled?)");
         return false;
     }
+    return true;
+}
 
-    app->last_rotate_ms = now_ms();
+/* Roll a new identity and (re)start the beacon with it. */
+static bool vigil_rotate(VigilEmitter* app) {
+    vigil_build_payload(app);
+    if(!vigil_arm(app)) return false;
     app->keys_emitted++;
     return true;
 }
@@ -215,34 +223,41 @@ static void vigil_stop(VigilEmitter* app) {
 static void vigil_start(VigilEmitter* app) {
     app->keys_emitted = 0;
     app->started_ms = now_ms();
+    app->key_epoch = 0;
     app->running = true;
     app->emitting = true;
     app->fault = !vigil_rotate(app);
     if(app->fault) vigil_stop(app);
 }
 
-/* Advance the duty-cycle phase and rotate the key when the period is up. */
+/* Advance the duty-cycle phase and rotate the key when the period is up.
+ *
+ * Both run on one absolute clock from the start of the run, the way SimTraces
+ * models them (identity `clone-${ts / rotationMs}`, duty `ts % (on + off) < on`):
+ * a key lasts one rotation period of wall time whether or not the radio is in a
+ * silent window, and resuming after silence keeps the same key unless a rotation
+ * boundary passed meanwhile. A silent window never mints a key of its own. */
 static void vigil_tick(VigilEmitter* app) {
     if(!app->running) return;
-    uint32_t now = now_ms();
+    uint32_t elapsed = now_ms() - app->started_ms;
+
+    uint32_t epoch = elapsed / ROTATIONS[app->rotation_idx].ms;
+    bool rekey = epoch != app->key_epoch;
 
     uint32_t off = duty_off_ms(app);
-    if(off > 0) {
-        uint32_t phase = (now - app->started_ms) % (DUTY_ON_MS + off);
-        bool should_emit = phase < DUTY_ON_MS;
-        if(should_emit != app->emitting) {
-            app->emitting = should_emit;
-            if(should_emit) {
-                app->fault = !vigil_rotate(app);
-            } else {
-                furi_hal_bt_extra_beacon_stop();
-            }
-            return;
-        }
-    }
+    bool should_emit = off == 0 || (elapsed % (DUTY_ON_MS + off)) < DUTY_ON_MS;
 
-    if(app->emitting && (now - app->last_rotate_ms) >= ROTATIONS[app->rotation_idx].ms) {
-        app->fault = !vigil_rotate(app);
+    if(!should_emit) {
+        if(app->emitting) {
+            app->emitting = false;
+            furi_hal_bt_extra_beacon_stop();
+        }
+        return;
+    }
+    if(!app->emitting || rekey) {
+        app->emitting = true;
+        app->key_epoch = epoch;
+        app->fault = !(rekey ? vigil_rotate(app) : vigil_arm(app));
     }
 }
 
@@ -313,9 +328,11 @@ static void adjust(VigilEmitter* app, int delta) {
         break;
     }
     /* TX power and the duty phase only take effect through set_config, which needs
-     * the beacon stopped — so re-arm immediately with the new settings. */
+     * the beacon stopped — so re-arm immediately with the new settings. A change
+     * while running starts a new run: fresh key, clock and duty phase. */
     if(app->running) {
         app->started_ms = now_ms();
+        app->key_epoch = 0;
         app->emitting = true;
         app->fault = !vigil_rotate(app);
     }
