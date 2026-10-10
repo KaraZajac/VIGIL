@@ -25,6 +25,12 @@ jobs:
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          # The action's default is "tools platform-tools", but the legacy "tools"
+          # package is gone from the SDK repository as of cmdline-tools 16.0, so
+          # sdkmanager exits 1 and the job dies before building anything. Gradle
+          # only needs platform-tools; it fetches platforms/build-tools itself.
+          packages: 'platform-tools'
 
       - name: Run unit tests
         run: |
