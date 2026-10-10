@@ -69,6 +69,14 @@ android {
     }
 }
 
+// Export the Room schema so real migrations can be written and tested. Until they
+// exist the database still falls back to destructive migration, but the user's
+// allowlist is now kept outside Room (see Settings) so a wipe no longer silently
+// un-approves their own trackers.
+ksp {
+    arg("room.schemaLocation", "$projectDir/schemas")
+}
+
 dependencies {
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)

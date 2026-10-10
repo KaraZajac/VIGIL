@@ -1,0 +1,315 @@
+{
+  "formatVersion": 1,
+  "database": {
+    "version": 4,
+    "identityHash": "12edef31c78a084c52e773f6b2442aba",
+    "entities": [
+      {
+        "tableName": "trackers",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`stableId` TEXT NOT NULL, `ecosystem` TEXT NOT NULL, `label` TEXT NOT NULL, `firstSeen` INTEGER NOT NULL, `lastSeen` INTEGER NOT NULL, `sightingCount` INTEGER NOT NULL, `riskState` TEXT NOT NULL, `approved` INTEGER NOT NULL, `baselineSafe` INTEGER NOT NULL, `lastAlertMs` INTEGER NOT NULL, `lastAnchorDay` INTEGER NOT NULL, `anchorDayCount` INTEGER NOT NULL, `lastRssi` INTEGER NOT NULL, `peakRssi` INTEGER NOT NULL, `distinctPlaces` INTEGER NOT NULL, `effectiveSightings` INTEGER NOT NULL, `lastMac` TEXT NOT NULL, PRIMARY KEY(`stableId`))",
+        "fields": [
+          {
+            "fieldPath": "stableId",
+            "columnName": "stableId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "ecosystem",
+            "columnName": "ecosystem",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "label",
+            "columnName": "label",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "firstSeen",
+            "columnName": "firstSeen",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "lastSeen",
+            "columnName": "lastSeen",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "sightingCount",
+            "columnName": "sightingCount",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "riskState",
+            "columnName": "riskState",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "approved",
+            "columnName": "approved",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "baselineSafe",
+            "columnName": "baselineSafe",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "lastAlertMs",
+            "columnName": "lastAlertMs",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "lastAnchorDay",
+            "columnName": "lastAnchorDay",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "anchorDayCount",
+            "columnName": "anchorDayCount",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "lastRssi",
+            "columnName": "lastRssi",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "peakRssi",
+            "columnName": "peakRssi",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "distinctPlaces",
+            "columnName": "distinctPlaces",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "effectiveSightings",
+            "columnName": "effectiveSightings",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "lastMac",
+            "columnName": "lastMac",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "stableId"
+          ]
+        },
+        "indices": [],
+        "foreignKeys": []
+      },
+      {
+        "tableName": "sightings",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `trackerId` TEXT NOT NULL, `timestamp` INTEGER NOT NULL, `rssi` INTEGER NOT NULL, `separated` INTEGER NOT NULL, `lat` REAL, `lon` REAL, `geohash7` TEXT)",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "trackerId",
+            "columnName": "trackerId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "timestamp",
+            "columnName": "timestamp",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "rssi",
+            "columnName": "rssi",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "separated",
+            "columnName": "separated",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "lat",
+            "columnName": "lat",
+            "affinity": "REAL",
+            "notNull": false
+          },
+          {
+            "fieldPath": "lon",
+            "columnName": "lon",
+            "affinity": "REAL",
+            "notNull": false
+          },
+          {
+            "fieldPath": "geohash7",
+            "columnName": "geohash7",
+            "affinity": "TEXT",
+            "notNull": false
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_sightings_trackerId_timestamp",
+            "unique": false,
+            "columnNames": [
+              "trackerId",
+              "timestamp"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_sightings_trackerId_timestamp` ON `${TABLE_NAME}` (`trackerId`, `timestamp`)"
+          }
+        ],
+        "foreignKeys": []
+      },
+      {
+        "tableName": "places",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`geohash6` TEXT NOT NULL, `label` TEXT NOT NULL, `visitCount` INTEGER NOT NULL, `lastSeen` INTEGER NOT NULL, `anchor` INTEGER NOT NULL, PRIMARY KEY(`geohash6`))",
+        "fields": [
+          {
+            "fieldPath": "geohash6",
+            "columnName": "geohash6",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "label",
+            "columnName": "label",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "visitCount",
+            "columnName": "visitCount",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "lastSeen",
+            "columnName": "lastSeen",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "anchor",
+            "columnName": "anchor",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "geohash6"
+          ]
+        },
+        "indices": [],
+        "foreignKeys": []
+      },
+      {
+        "tableName": "alerts",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `trackerId` TEXT NOT NULL, `ecosystem` TEXT NOT NULL, `label` TEXT NOT NULL, `timestamp` INTEGER NOT NULL, `distinctPlaces` INTEGER NOT NULL, `peakRssi` INTEGER NOT NULL, `lat` REAL, `lon` REAL)",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "trackerId",
+            "columnName": "trackerId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "ecosystem",
+            "columnName": "ecosystem",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "label",
+            "columnName": "label",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "timestamp",
+            "columnName": "timestamp",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "distinctPlaces",
+            "columnName": "distinctPlaces",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "peakRssi",
+            "columnName": "peakRssi",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "lat",
+            "columnName": "lat",
+            "affinity": "REAL",
+            "notNull": false
+          },
+          {
+            "fieldPath": "lon",
+            "columnName": "lon",
+            "affinity": "REAL",
+            "notNull": false
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [],
+        "foreignKeys": []
+      }
+    ],
+    "views": [],
+    "setupQueries": [
+      "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '12edef31c78a084c52e773f6b2442aba')"
+    ]
+  }
+}

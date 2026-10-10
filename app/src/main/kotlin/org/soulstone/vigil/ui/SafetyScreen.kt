@@ -18,10 +18,10 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Call
-import androidx.compose.material.icons.filled.Chat
-import androidx.compose.material.icons.filled.OpenInNew
+import androidx.compose.material.icons.automirrored.filled.Chat
+import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -54,7 +54,7 @@ fun SafetyScreen(onBack: () -> Unit) {
     Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
         Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(20.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                IconButton(onClick = onBack) { Icon(Icons.Filled.ArrowBack, "Back") }
+                IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") }
                 Spacer(Modifier.size(4.dp))
                 Text("If a tracker is following you", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
             }
@@ -94,7 +94,7 @@ fun SafetyScreen(onBack: () -> Unit) {
                             Icon(Icons.Filled.Call, null, modifier = Modifier.size(18.dp)); Spacer(Modifier.size(6.dp)); Text("Call")
                         }
                         OutlinedButton(onClick = { go(Intent(Intent.ACTION_SENDTO, Uri.parse("smsto:88788")).putExtra("sms_body", "START")) }, modifier = Modifier.weight(1f)) {
-                            Icon(Icons.Filled.Chat, null, modifier = Modifier.size(18.dp)); Spacer(Modifier.size(6.dp)); Text("Text START")
+                            Icon(Icons.AutoMirrored.Filled.Chat, null, modifier = Modifier.size(18.dp)); Spacer(Modifier.size(6.dp)); Text("Text START")
                         }
                     }
                 }
@@ -115,7 +115,7 @@ fun SafetyScreen(onBack: () -> Unit) {
                 onClick = { go(Intent(Intent.ACTION_VIEW, Uri.parse("https://www.stalkingawareness.org/what-to-do-if-you-are-being-stalked/"))) },
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Icon(Icons.Filled.OpenInNew, null, modifier = Modifier.size(18.dp))
+                Icon(Icons.AutoMirrored.Filled.OpenInNew, null, modifier = Modifier.size(18.dp))
                 Spacer(Modifier.size(8.dp))
                 Text("What to do if you're being stalked (SPARC)")
             }

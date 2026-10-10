@@ -27,7 +27,15 @@ import org.soulstone.vigil.model.TrackerObservation
  */
 class BleTrackerScanner(
     private val context: Context,
-    private val onObservation: (TrackerObservation) -> Unit
+    private val onObservation: (TrackerObservation) -> Unit,
+    /**
+     * Called when the controller kills the scan (see [ScanCallback.onScanFailed]).
+     * This MUST reach the service: a dead scan used to be recorded only in this
+     * object's private [running] flag, so the service kept reporting that it was
+     * watching and the UI kept telling the user they were clear while nothing was
+     * being listened for.
+     */
+    private val onFailure: (Int) -> Unit = {}
 ) {
     companion object {
         private const val TAG = "BleTrackerScanner"
@@ -62,6 +70,17 @@ class BleTrackerScanner(
         for (uuid in TrackerSignatures.trackerServiceUuids) {
             add(ScanFilter.Builder().setServiceData(uuid, ByteArray(0)).build())
         }
+    }
+
+    /** True only while the controller is actually delivering results to us. */
+    val isScanning: Boolean get() = running
+
+    /** Why [start] would fail right now, or null if it should succeed. */
+    fun unavailableReason(): String? {
+        if (!hasScanPermission()) return "Bluetooth scan permission is not granted"
+        val a = adapter ?: return "This device has no Bluetooth adapter"
+        if (!a.isEnabled) return "Bluetooth is turned off"
+        return null
     }
 
     fun hasScanPermission(): Boolean =
@@ -104,8 +123,11 @@ class BleTrackerScanner(
         if (!running) return
         try {
             leScanner?.stopScan(callback)
-        } catch (e: SecurityException) {
-            Log.e(TAG, "SecurityException stopping scan", e)
+        } catch (e: Exception) {
+            // Broadened deliberately: this is now called from the Bluetooth-state
+            // receiver, and the adapter is typically already off by then, which makes
+            // stopScan throw IllegalStateException. Teardown must not crash the app.
+            Log.w(TAG, "stopScan failed (adapter likely already off): ${e.message}")
         }
         running = false
     }
@@ -122,6 +144,7 @@ class BleTrackerScanner(
         override fun onScanFailed(errorCode: Int) {
             Log.e(TAG, "BLE scan failed: $errorCode")
             running = false
+            onFailure(errorCode)
         }
     }
 }

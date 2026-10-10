@@ -25,7 +25,21 @@ import java.util.TimeZone
  * The temporal core. Persists sightings, maintains the learned baseline, and runs
  * the co-movement evaluation on every observation. All state is on-device.
  */
-class TrackerRepository(private val db: VigilDatabase) {
+/**
+ * A record of the user's "this is mine" decisions that outlives the Room database.
+ * [VigilDatabase] falls back to destructive migration, so a schema bump wipes every
+ * approval and the user's own AirTag starts alerting again after an app update.
+ * Keeping the allowlist outside the database survives that.
+ */
+interface ApprovedStore {
+    fun isApproved(id: String): Boolean
+    fun setApproved(id: String, approved: Boolean)
+}
+
+class TrackerRepository(
+    private val db: VigilDatabase,
+    private val approvedStore: ApprovedStore? = null
+) {
 
     // Serialises record() so the read-modify-write of a tracker row is atomic —
     // concurrent observations were racing and losing count / first-seen updates.
@@ -39,6 +53,7 @@ class TrackerRepository(private val db: VigilDatabase) {
     // user's choice back to its stale value.
     suspend fun setApproved(id: String, approved: Boolean) = mutex.withLock {
         db.trackerDao().setApproved(id, approved)
+        approvedStore?.setApproved(id, approved)
     }
 
     suspend fun clearBaseline(id: String) = mutex.withLock {
@@ -83,7 +98,9 @@ class TrackerRepository(private val db: VigilDatabase) {
         )
 
         val existing = db.trackerDao().get(obs.stableId)
-        val approved = existing?.approved ?: false
+        // Fall back to the durable allowlist for a tracker we have no row for, which
+        // is the case after a destructive migration or a "Clear all".
+        val approved = existing?.approved ?: (approvedStore?.isApproved(obs.stableId) == true)
 
         // Co-movement assessment first — it decides both display AND whether this
         // tag is safe to baseline. Always computed (UI shows the evidence numbers).
@@ -98,7 +115,10 @@ class TrackerRepository(private val db: VigilDatabase) {
         var anchorDayCount = existing?.anchorDayCount ?: 0
         var baselineSafe = existing?.baselineSafe ?: false
         if (geohash6 != null) {
-            val isAnchor = BaselineManager.noteLocation(db.placeDao(), geohash6, now)
+            // Read-only: dwell accrual now happens on a timer in ScanService via
+            // [notePlace], so anchors reflect time spent somewhere rather than how
+            // many trackers advertised there.
+            val isAnchor = db.placeDao().get(geohash6)?.anchor == true
             // ONLY baseline-trust a tag that is NOT co-moving with you. A planted
             // stalker tag co-moves (that's the whole detection), so it stays
             // SUSPICIOUS/ALERTING and must never be auto-trusted into silence.
@@ -156,6 +176,43 @@ class TrackerRepository(private val db: VigilDatabase) {
         RecordResult(updated, newlyAlerting)
     }
 
+    /**
+     * Note that the user is here, independent of any tracker sighting, so anchor
+     * places accrue from dwell time. Called on a timer by the scan service.
+     */
+    suspend fun notePlace(lat: Double, lon: Double) = mutex.withLock {
+        BaselineManager.noteLocation(
+            db.placeDao(), Geohash.encode(lat, lon, 6), System.currentTimeMillis()
+        )
+    }
+
+    /**
+     * Log a rotating-clone detection. It has no stable identity by definition, so it
+     * is recorded under a synthetic id with the presence-run evidence attached.
+     */
+    suspend fun recordCloneAlert(
+        cells: Int,
+        peakRssi: Int,
+        lat: Double?,
+        lon: Double?,
+        now: Long
+    ) = mutex.withLock {
+        db.alertDao().insert(
+            AlertEntity(
+                trackerId = CLONE_TRACKER_ID,
+                ecosystem = TrackerEcosystem.ROTATING_CLONE.name,
+                label = "Identity-rotating tracker",
+                timestamp = now,
+                distinctPlaces = cells,
+                peakRssi = peakRssi,
+                lat = lat, lon = lon
+            )
+        )
+    }
+
+    /** Last persisted clone alert, so the cooldown survives a service restart. */
+    suspend fun lastCloneAlertAt(): Long? = db.alertDao().lastAlertAt(CLONE_TRACKER_ID)
+
     fun observeAlerts(): Flow<List<AlertEntity>> = db.alertDao().observeAll()
 
     suspend fun clearAlerts() = db.alertDao().clear()
@@ -201,18 +258,34 @@ class TrackerRepository(private val db: VigilDatabase) {
         return sb.toString()
     }
 
-    /** GPX of every geotagged sighting, to open in a maps app. */
+    /**
+     * GPX of the trail of the trackers that actually alerted, to open in a maps app.
+     * Deliberately NOT every sighting: an unscoped export handed over a 14-day
+     * movement log of the user with every ambient tracker in it.
+     */
     suspend fun buildGpx(): String {
         val fmt = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).apply {
             timeZone = TimeZone.getTimeZone("UTC")
         }
+        val alerts = db.alertDao().all()
+        val ids = alerts.map { it.trackerId }.distinct()
         val sb = StringBuilder()
         sb.appendLine("""<?xml version="1.0" encoding="UTF-8"?>""")
         sb.appendLine("""<gpx version="1.1" creator="VIGIL" xmlns="http://www.topografix.com/GPX/1/1">""")
-        for (s in db.sightingDao().allGeotagged()) {
+        for (s in if (ids.isEmpty()) emptyList() else db.sightingDao().geotaggedFor(ids)) {
             sb.appendLine("""  <wpt lat="${s.lat}" lon="${s.lon}">""")
             sb.appendLine("    <time>${fmt.format(Date(s.timestamp))}</time>")
             sb.appendLine("    <name>${trackerShortName(s.trackerId)} ${s.rssi}dBm</name>")
+            sb.appendLine("  </wpt>")
+        }
+        // A rotating clone has no sightings under its synthetic id, so its evidence is
+        // the alert location itself. Include every alert point for the same reason.
+        for (a in alerts) {
+            val la = a.lat; val lo = a.lon
+            if (la == null || lo == null) continue
+            sb.appendLine("""  <wpt lat="$la" lon="$lo">""")
+            sb.appendLine("    <time>${fmt.format(Date(a.timestamp))}</time>")
+            sb.appendLine("    <name>ALERT ${trackerShortName(a.trackerId)}</name>")
             sb.appendLine("  </wpt>")
         }
         sb.appendLine("</gpx>")
@@ -221,6 +294,9 @@ class TrackerRepository(private val db: VigilDatabase) {
 
     companion object {
         const val RETENTION_DAYS = 14
+
+        /** Synthetic tracker id for presence-engine (rotating clone) detections. */
+        const val CLONE_TRACKER_ID = "clone:rotating"
     }
 }
 
@@ -233,5 +309,6 @@ private fun trackerShortName(stableId: String): String = when (stableId.substrin
     "samsung" -> "SmartTag"
     "tile" -> "Tile"
     "dult" -> "DULT"
+    "clone" -> "RotatingClone"
     else -> "Tracker"
 }

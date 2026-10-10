@@ -7,6 +7,13 @@ enum class TrackerEcosystem(val display: String) {
     SAMSUNG_SMARTTAG("Samsung SmartTag"),
     TILE("Tile"),
     DULT("DULT tracker"),
+    /**
+     * Not a parsed wire format: the verdict of the identity-agnostic presence engine,
+     * which detects one radio churning its identity faster than any spec-compliant
+     * tracker may. [org.soulstone.vigil.scan.TrackerParser] never emits this; it
+     * exists so a clone detection can be stored and displayed like any other alert.
+     */
+    ROTATING_CLONE("Rotating-ID tracker"),
     UNKNOWN("Unknown tracker")
 }
 

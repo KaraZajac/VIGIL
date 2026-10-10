@@ -122,8 +122,13 @@ interface SightingDao {
     @Query("SELECT * FROM sightings WHERE trackerId = :id ORDER BY timestamp")
     suspend fun allFor(id: String): List<SightingEntity>
 
-    @Query("SELECT * FROM sightings WHERE lat IS NOT NULL ORDER BY timestamp")
-    suspend fun allGeotagged(): List<SightingEntity>
+    /**
+     * Geotagged sightings for specific trackers only. The evidence export used an
+     * unscoped version of this, so the exported GPX was a 14-day movement log of the
+     * user with every ambient tracker mixed in, rather than the flagged device's trail.
+     */
+    @Query("SELECT * FROM sightings WHERE lat IS NOT NULL AND trackerId IN (:ids) ORDER BY timestamp")
+    suspend fun geotaggedFor(ids: List<String>): List<SightingEntity>
 
     @Query("DELETE FROM sightings WHERE timestamp < :cutoff")
     suspend fun prune(cutoff: Long)
@@ -152,6 +157,9 @@ interface AlertDao {
     @Query("SELECT * FROM alerts ORDER BY timestamp DESC")
     suspend fun all(): List<AlertEntity>
 
+    @Query("SELECT MAX(timestamp) FROM alerts WHERE trackerId = :id")
+    suspend fun lastAlertAt(id: String): Long?
+
     @Query("DELETE FROM alerts")
     suspend fun clear()
 }
@@ -159,7 +167,8 @@ interface AlertDao {
 @Database(
     entities = [TrackerEntity::class, SightingEntity::class, PlaceEntity::class, AlertEntity::class],
     version = 4,
-    exportSchema = false
+    // Exported to app/schemas so a real migration can be written instead of wiping.
+    exportSchema = true
 )
 abstract class VigilDatabase : RoomDatabase() {
     abstract fun trackerDao(): TrackerDao
@@ -175,6 +184,10 @@ abstract class VigilDatabase : RoomDatabase() {
                 context.applicationContext,
                 VigilDatabase::class.java,
                 "vigil.db"
+                // Still destructive: no migrations exist for versions 1-4, and
+                // crashing an install is worse than rebuilding the sighting history,
+                // which re-populates as devices are re-detected. The allowlist is no
+                // longer collateral damage — it lives in Settings (ApprovedStore).
             ).fallbackToDestructiveMigration().build().also { INSTANCE = it }
         }
     }

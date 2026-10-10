@@ -38,6 +38,7 @@ class MainActivity : ComponentActivity() {
     private lateinit var settings: Settings
     private lateinit var repo: TrackerRepository
     private val permissionsGranted = mutableStateOf(false)
+    private val notificationsGranted = mutableStateOf(true)
 
     private val requiredPermissions: Array<String>
         get() = buildList {
@@ -64,13 +65,16 @@ class MainActivity : ComponentActivity() {
         // block protection if the user declines it.
         val granted = hasEssentialPermissions()
         permissionsGranted.value = granted
+        notificationsGranted.value = hasNotificationPermission()
         if (granted) ScanService.start(this)
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         settings = Settings.get(this)
-        repo = TrackerRepository(VigilDatabase.get(this))
+        // Settings doubles as the durable allowlist, so approvals survive the
+        // database's destructive migration fallback.
+        repo = TrackerRepository(VigilDatabase.get(this), approvedStore = settings)
         permissionsGranted.value = hasEssentialPermissions()
 
         setContent {
@@ -95,16 +99,29 @@ class MainActivity : ComponentActivity() {
                     }
                     else -> {
                         val running by ScanService.running.collectAsState()
+                        val scanFault by ScanService.scanFault.collectAsState()
                         val trackers by repo.observeTrackers().collectAsState(initial = emptyList())
                         val sensitivity by settings.sensitivity.collectAsState()
                         val granted by permissionsGranted
+                        val notifyGranted by notificationsGranted
 
                         MainScreen(
                             running = running,
                             trackers = trackers,
                             sensitivity = sensitivity,
-                            permissionMessage = if (granted) null
-                            else "Grant Bluetooth + location to start watching",
+                            // Notifications are deliberately not required to start
+                            // watching, but if they are off, alerts can only vibrate —
+                            // so say so rather than leaving it unsignalled.
+                            permissionMessage = when {
+                                !granted -> "Grant Bluetooth + location to start watching"
+                                !notifyGranted -> "Notifications are off — alerts can only vibrate. Tap to fix."
+                                else -> null
+                            },
+                            onPermissionClick = {
+                                if (!granted) permissionLauncher.launch(requiredPermissions)
+                                else openAppSettings()
+                            },
+                            scanFault = scanFault,
                             onStartStop = {
                                 if (running) {
                                     ScanService.stop(this)
@@ -136,11 +153,19 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         permissionsGranted.value = hasEssentialPermissions()
+        notificationsGranted.value = hasNotificationPermission()
     }
 
     private fun hasEssentialPermissions(): Boolean = requiredPermissions
         .filter { it != Manifest.permission.POST_NOTIFICATIONS }
         .all { ContextCompat.checkSelfPermission(this, it) == PackageManager.PERMISSION_GRANTED }
+
+    /** Optional, but without it a confirmed follower can only buzz the phone. */
+    private fun hasNotificationPermission(): Boolean =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) ==
+                PackageManager.PERMISSION_GRANTED
+        } else true
 
     private fun ringTracker(tracker: TrackerEntity) {
         Toast.makeText(this, "Trying to ring ${tracker.label}…", Toast.LENGTH_SHORT).show()
@@ -178,7 +203,6 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    @Suppress("unused")
     private fun openAppSettings() {
         startActivity(
             Intent(

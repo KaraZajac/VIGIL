@@ -4,8 +4,11 @@ import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
+import android.bluetooth.BluetoothAdapter
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.VibrationEffect
@@ -14,6 +17,7 @@ import android.os.VibratorManager
 import android.util.Log
 import java.util.concurrent.ConcurrentHashMap
 import androidx.core.app.NotificationCompat
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.LifecycleService
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.Job
@@ -51,6 +55,8 @@ class ScanService : LifecycleService() {
         private const val PRUNE_INTERVAL_MS = 6 * 3_600_000L
         private const val CLONE_COOLDOWN_MS = 2 * 3_600_000L
         private const val MIN_RECORD_INTERVAL_MS = 15_000L  // per-device DB throttle
+        private const val MAX_THROTTLE_ENTRIES = 4096
+        private const val PLACE_TICK_MS = 5 * 60_000L       // dwell accrual for the baseline
         private const val ALERT_CHANNEL_ID = "vigil_alerts"
         private const val ALERT_NOTIF_ID = 0x5162
         private const val CLONE_NOTIF_ID = 0x5163
@@ -60,6 +66,15 @@ class ScanService : LifecycleService() {
 
         private val _running = MutableStateFlow(false)
         val running: StateFlow<Boolean> = _running.asStateFlow()
+
+        /**
+         * Non-null while a watching session is live but NOT actually listening —
+         * Bluetooth switched off, permission revoked, or the controller killed the
+         * scan. The UI must show this instead of "you're clear", because otherwise
+         * the app reassures someone it has stopped protecting.
+         */
+        private val _scanFault = MutableStateFlow<String?>(null)
+        val scanFault: StateFlow<String?> = _scanFault.asStateFlow()
 
         // Live RSSI stream for the "find it" hot/cold screen. The UI sets a target
         // stableId; every matching advert (not the throttled DB path) updates this.
@@ -93,13 +108,15 @@ class ScanService : LifecycleService() {
     private val lastRecordedAt = ConcurrentHashMap<String, Long>()
     @Volatile private var lastCloneAlertMs = 0L
     private var pruneJob: Job? = null
+    private var placeJob: Job? = null
+    private var btReceiverRegistered = false
 
     override fun onCreate() {
         super.onCreate()
         settings = Settings.get(this)
         repo = TrackerRepository(VigilDatabase.get(this))
         location = LocationProvider(this)
-        scanner = BleTrackerScanner(this, onObservation = ::onObservation)
+        scanner = BleTrackerScanner(this, onObservation = ::onObservation, onFailure = ::onScanFailure)
         createNotificationChannel()
     }
 
@@ -116,14 +133,20 @@ class ScanService : LifecycleService() {
         if (_running.value) return
         presence.reset()
         startInForeground()
+        registerBluetoothReceiver()
         location.start()  // best-effort; scanning still runs without a fix (just no co-movement)
         if (!scanner.start()) {
             Log.w(TAG, "scanner failed to start (permission/adapter) — stopping")
             end(); stopSelf(); return
         }
         _running.value = true
+        _scanFault.value = null
         pruneJob?.cancel()
         pruneJob = lifecycleScope.launch {
+            // The clone cooldown lives in memory, so a service restart used to re-arm
+            // it instantly and could re-notify about the same rotating presence.
+            // Seed it from what was actually persisted.
+            runCatching { repo.lastCloneAlertAt() }.getOrNull()?.let { lastCloneAlertMs = it }
             while (true) {
                 // Prune first (frequent restarts previously meant the 6h-delayed
                 // prune rarely ran, so stale rotated identities accumulated).
@@ -131,6 +154,81 @@ class ScanService : LifecycleService() {
                 delay(PRUNE_INTERVAL_MS)
             }
         }
+        placeJob?.cancel()
+        placeJob = lifecycleScope.launch {
+            // Anchor places must accrue from time actually spent somewhere, not from
+            // how many trackers happen to advertise there. Previously dwell was only
+            // noted when a sighting arrived, so a tracker-free home never became an
+            // anchor and household tags were never auto-trusted.
+            while (true) {
+                location.location.value?.let { fix ->
+                    runCatching { repo.notePlace(fix.latitude, fix.longitude) }
+                        .onFailure { Log.w(TAG, "notePlace failed: ${it.message}") }
+                }
+                delay(PLACE_TICK_MS)
+            }
+        }
+    }
+
+    /** The controller killed the scan. Keep the session, but stop claiming cover. */
+    private fun onScanFailure(errorCode: Int) {
+        if (!_running.value) return
+        Log.e(TAG, "scan failed ($errorCode) — reporting fault")
+        setFault(scanner.unavailableReason() ?: "Bluetooth scanning stopped unexpectedly")
+    }
+
+    private fun setFault(reason: String?) {
+        if (_scanFault.value == reason) return
+        _scanFault.value = reason
+        if (!_running.value) return
+        // The ongoing notification is the only surface visible with the app closed,
+        // so it has to carry the bad news too.
+        val n = buildNotification(
+            title = getString(R.string.app_name),
+            text = reason ?: getString(R.string.notification_text),
+            high = false
+        )
+        runCatching { getSystemService(NotificationManager::class.java)?.notify(NOTIFICATION_ID, n) }
+    }
+
+    /** Re-arm the scan after Bluetooth comes back, or record why it still can't run. */
+    private fun tryResumeScan() {
+        if (!_running.value) return
+        if (scanner.isScanning) { setFault(null); return }
+        if (scanner.start()) setFault(null)
+        else setFault(scanner.unavailableReason() ?: "Bluetooth scanning is unavailable")
+    }
+
+    private val btReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            if (intent?.action != BluetoothAdapter.ACTION_STATE_CHANGED) return
+            when (intent.getIntExtra(BluetoothAdapter.EXTRA_STATE, BluetoothAdapter.ERROR)) {
+                BluetoothAdapter.STATE_TURNING_OFF, BluetoothAdapter.STATE_OFF -> {
+                    // Android silently drops the scan here without calling
+                    // onScanFailed, so this receiver is the only way to notice.
+                    scanner.stop()
+                    setFault("Bluetooth is turned off — not watching")
+                }
+                BluetoothAdapter.STATE_ON -> tryResumeScan()
+            }
+        }
+    }
+
+    private fun registerBluetoothReceiver() {
+        if (btReceiverRegistered) return
+        ContextCompat.registerReceiver(
+            this,
+            btReceiver,
+            IntentFilter(BluetoothAdapter.ACTION_STATE_CHANGED),
+            ContextCompat.RECEIVER_NOT_EXPORTED
+        )
+        btReceiverRegistered = true
+    }
+
+    private fun unregisterBluetoothReceiver() {
+        if (!btReceiverRegistered) return
+        runCatching { unregisterReceiver(btReceiver) }
+        btReceiverRegistered = false
     }
 
     private fun onObservation(obs: TrackerObservation) {
@@ -149,6 +247,20 @@ class ScanService : LifecycleService() {
             ) {
                 lastCloneAlertMs = obs.timestampMs
                 raiseCloneAlert()
+                // Persist it too. A notification alone left the headline detection
+                // out of the alert history AND out of the evidence export, so
+                // dismissing the notification destroyed the only record of it.
+                lifecycleScope.launch {
+                    runCatching {
+                        repo.recordCloneAlert(
+                            cells = v.distinctCells,
+                            peakRssi = obs.rssi,
+                            lat = fix?.latitude,
+                            lon = fix?.longitude,
+                            now = obs.timestampMs
+                        )
+                    }.onFailure { Log.w(TAG, "clone alert not persisted: ${it.message}") }
+                }
             }
         }
 
@@ -160,7 +272,13 @@ class ScanService : LifecycleService() {
         val last = lastRecordedAt[obs.stableId]
         if (last != null && obs.timestampMs - last < MIN_RECORD_INTERVAL_MS) return
         lastRecordedAt[obs.stableId] = obs.timestampMs
-        if (lastRecordedAt.size > 4096) lastRecordedAt.clear()  // guard vs MAC-rotation growth
+        if (lastRecordedAt.size > MAX_THROTTLE_ENTRIES) {
+            // Evict only entries whose throttle has already lapsed. Clearing the whole
+            // map made every known device instantly re-recordable, producing a burst of
+            // database writes exactly when the device population was largest.
+            val expired = obs.timestampMs - MIN_RECORD_INTERVAL_MS
+            lastRecordedAt.entries.removeIf { it.value < expired }
+        }
 
         lifecycleScope.launch {
             val result = runCatching {
@@ -175,10 +293,13 @@ class ScanService : LifecycleService() {
         // end() on a failed scanner start (when _running was never set) to make sure
         // the location updates and foreground notification are released, not leaked.
         _running.value = false
+        _scanFault.value = null
+        unregisterBluetoothReceiver()
         scanner.stop()
         location.stop()
         lastRecordedAt.clear()
         pruneJob?.cancel(); pruneJob = null
+        placeJob?.cancel(); placeJob = null
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
             stopForeground(STOP_FOREGROUND_REMOVE)
         } else {

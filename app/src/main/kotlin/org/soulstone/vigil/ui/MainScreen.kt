@@ -15,6 +15,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import kotlinx.coroutines.delay
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -30,6 +31,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Bluetooth
+import androidx.compose.material.icons.filled.BluetoothDisabled
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.GppMaybe
@@ -93,6 +95,8 @@ fun MainScreen(
     trackers: List<TrackerEntity>,
     sensitivity: Sensitivity,
     permissionMessage: String?,
+    onPermissionClick: () -> Unit,
+    scanFault: String?,
     onStartStop: () -> Unit,
     onSetSensitivity: (Sensitivity) -> Unit,
     onApprove: (String, Boolean) -> Unit,
@@ -106,7 +110,15 @@ fun MainScreen(
     var detail by remember { mutableStateOf<TrackerEntity?>(null) }
     var finding by remember { mutableStateOf<TrackerEntity?>(null) }
 
-    val now = System.currentTimeMillis()
+    // Ticks so the Active window keeps advancing. A single composition-time value
+    // meant the list only re-filtered when a new sighting arrived, so with scanning
+    // stopped, stale trackers sat in "Active" forever.
+    val now by produceState(System.currentTimeMillis()) {
+        while (true) {
+            value = System.currentTimeMillis()
+            delay(30_000)
+        }
+    }
     val active = trackers
         .filter { !isTrusted(it) && now - it.lastSeen < ACTIVE_WINDOW_MS }
         .sortedByDescending { riskRank(it) }
@@ -179,7 +191,7 @@ fun MainScreen(
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             item { Spacer(Modifier.height(4.dp)) }
-            item { StatusHero(running, alerting, suspicious) }
+            item { StatusHero(running, alerting, suspicious, scanFault) }
             item {
                 Button(
                     onClick = onStartStop,
@@ -198,7 +210,12 @@ fun MainScreen(
             }
             permissionMessage?.let {
                 item {
-                    Text(it, style = MaterialTheme.typography.bodySmall, color = VigilPeach)
+                    Text(
+                        it,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = VigilPeach,
+                        modifier = Modifier.fillMaxWidth().clickable(onClick = onPermissionClick)
+                    )
                 }
             }
             item { SensitivitySelector(sensitivity, onSetSensitivity) }
@@ -270,7 +287,7 @@ fun MainScreen(
 }
 
 @Composable
-private fun StatusHero(running: Boolean, alerting: Int, suspicious: Int) {
+private fun StatusHero(running: Boolean, alerting: Int, suspicious: Int, scanFault: String?) {
     data class Look(val title: String, val subtitle: String, val icon: ImageVector, val color: Color)
 
     val look = when {
@@ -278,6 +295,11 @@ private fun StatusHero(running: Boolean, alerting: Int, suspicious: Int) {
         alerting > 0 -> Look(
             if (alerting == 1) "A tracker is following you" else "$alerting trackers following you",
             "Moving with you across places and time.", Icons.Filled.Warning, VigilRed
+        )
+        // A dead scan must never read as safety. This case used to be invisible, so
+        // the app showed "You're clear" while it had stopped listening entirely.
+        scanFault != null -> Look(
+            "Not watching", scanFault, Icons.Filled.BluetoothDisabled, VigilPeach
         )
         suspicious > 0 -> Look(
             "Keeping watch",
