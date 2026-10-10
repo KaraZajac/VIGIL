@@ -114,7 +114,10 @@ class ScanService : LifecycleService() {
     override fun onCreate() {
         super.onCreate()
         settings = Settings.get(this)
-        repo = TrackerRepository(VigilDatabase.get(this))
+        // The durable allowlist has to be wired here too: this is the repository that
+        // records sightings, so without it approvals were never restored after a
+        // "Clear all" or a destructive migration.
+        repo = TrackerRepository(VigilDatabase.get(this), approvedStore = settings)
         location = LocationProvider(this)
         scanner = BleTrackerScanner(this, onObservation = ::onObservation, onFailure = ::onScanFailure)
         createNotificationChannel()
