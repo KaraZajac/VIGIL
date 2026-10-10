@@ -175,3 +175,9 @@ Stands on the shoulders of **[AirGuard](https://github.com/seemoo-lab/AirGuard)*
 working group, Adam Catley's AirTag teardown, and Positive Security's *Find You*
 clone research. VIGIL's aim is to go *beyond* AirGuard on the attacks it
 structurally cannot catch — see the design doc.
+
+## License
+
+VIGIL is released under the [BSD 3-Clause License](LICENSE). The web fonts in
+`docs/fonts/` are separately licensed under the SIL Open Font License 1.1; see
+[`docs/fonts/OFL.txt`](docs/fonts/OFL.txt).
