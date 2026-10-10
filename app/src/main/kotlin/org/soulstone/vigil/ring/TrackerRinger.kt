@@ -36,6 +36,10 @@ import kotlin.coroutines.resume
  *  - Find My legacy (fd44): enable notifications, write [0x01,0x00,0x03].
  * Samsung SmartTag and Tile expose NO non-owner ring — the app tells the user to use
  * the vendor app instead.
+ *
+ * Nothing here claims "ringing" from a write ACK or from the mere arrival of a reply:
+ * an AirTag confirms by self-disconnecting with status 19, and a DULT reply is parsed
+ * by [RingReplyParser] so a refusal is reported as one.
  */
 object TrackerRinger {
 
@@ -150,22 +154,40 @@ object TrackerRinger {
                 }
 
                 override fun onCharacteristicWrite(g: BluetoothGatt, ch: BluetoothGattCharacteristic, status: Int) {
-                    if (selected == AIRTAG) { finish("Ringing - listen for the AirTag.", g); return }
+                    // An indication can beat the write callback; if the reply already
+                    // settled the outcome, don't arm a fallback that would fire later.
+                    if (!cont.isActive) return
+                    // Status FIRST. The AirTag branch used to return ahead of this check,
+                    // so a write the tracker rejected still reported "Ringing".
                     if (status != BluetoothGatt.GATT_SUCCESS) { finish("The tracker refused the ring command.", g); return }
-                    // DULT/FindMy confirm via an indication. Wait briefly; if none arrives, the tag
-                    // likely isn't separated from its owner (so it won't actually ring).
+                    // Every protocol here confirms out-of-band: an AirTag self-disconnects
+                    // with status 19 once it is actually ringing, DULT/FindMy send an
+                    // indication. A write ACK only means the command was accepted, so wait
+                    // for the real confirmation and fall back to saying exactly that.
+                    val isAirTag = selected == AIRTAG
                     handler.postDelayed({
-                        finish("Ring command sent, but the tracker didn't confirm - it only rings when separated from its owner.", g)
-                    }, 4000)
+                        finish(
+                            if (isAirTag)
+                                "Ring command accepted - listen for the AirTag. It only rings while separated from its owner."
+                            else
+                                "Ring command sent, but the tracker didn't confirm - it only rings when separated from its owner.",
+                            g
+                        )
+                    }, if (isAirTag) 6000 else 4000)
                 }
 
+                // Read what the tracker actually said. Both overloads used to report
+                // "Ringing confirmed" for ANY reply, so a tag refusing the command —
+                // which a DULT tag must do whenever it is near its owner — looked
+                // exactly like one that was ringing.
                 @Suppress("DEPRECATION")
                 override fun onCharacteristicChanged(g: BluetoothGatt, ch: BluetoothGattCharacteristic) {
-                    finish("Ringing confirmed - listen for the tracker.", g)
+                    // Pre-API-33 path: the value is only available on the characteristic.
+                    finish(RingReplyParser.message(RingReplyParser.parse(ch.value)), g)
                 }
 
                 override fun onCharacteristicChanged(g: BluetoothGatt, ch: BluetoothGattCharacteristic, value: ByteArray) {
-                    finish("Ringing confirmed - listen for the tracker.", g)
+                    finish(RingReplyParser.message(RingReplyParser.parse(value)), g)
                 }
             }
             gatt = device.connectGatt(context, false, callback, BluetoothDevice.TRANSPORT_LE)
