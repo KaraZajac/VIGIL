@@ -1,0 +1,13 @@
+App(
+    appid="vigil_emitter",
+    name="VIGIL Emitter",
+    apptype=FlipperAppType.EXTERNAL,
+    entry_point="vigil_emitter_app",
+    requires=["gui"],
+    stack_size=2 * 1024,
+    order=50,
+    fap_category="Bluetooth",
+    fap_version=(0, 1),
+    fap_description="Red-team beacon for validating the VIGIL tracker detector: emits Find My-shaped adverts with a sweepable key-rotation period and duty cycle. Keys are random and unregistered, so it cannot report location.",
+    fap_author="KaraZajac",
+)

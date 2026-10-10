@@ -58,6 +58,15 @@ android {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
         }
     }
+
+    // The detection-evaluation tests print result tables (latency, FP/carry-day,
+    // the rotation sweep); surface them in the Gradle/CI log rather than burying
+    // them in the HTML report.
+    testOptions {
+        unitTests.all {
+            it.testLogging { showStandardStreams = true }
+        }
+    }
 }
 
 dependencies {
