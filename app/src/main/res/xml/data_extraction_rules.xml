@@ -1,5 +1,21 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- Android 12+. Nothing VIGIL records may leave the phone through backup or a
+     phone-to-phone transfer: sightings carry location history. allowBackup="false"
+     alone doesn't stop device-to-device transfer on every manufacturer's devices, and
+     a missing <device-transfer> section means "transfer everything". -->
 <data-extraction-rules>
     <cloud-backup>
+        <exclude domain="root" path="." />
+        <exclude domain="file" path="." />
+        <exclude domain="database" path="." />
+        <exclude domain="sharedpref" path="." />
+        <exclude domain="external" path="." />
     </cloud-backup>
+    <device-transfer>
+        <exclude domain="root" path="." />
+        <exclude domain="file" path="." />
+        <exclude domain="database" path="." />
+        <exclude domain="sharedpref" path="." />
+        <exclude domain="external" path="." />
+    </device-transfer>
 </data-extraction-rules>
