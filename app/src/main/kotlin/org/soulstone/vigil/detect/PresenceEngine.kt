@@ -39,7 +39,7 @@ class PresenceEngine {
     )
 
     companion object {
-        const val R_CLOSE = -65               // dBm; the on-body/in-bag close band
+        const val R_CLOSE = -65               // dBm; the close band (nearby, not necessarily on-body)
         const val G_BREAK_MS = 20_000L        // gap that ends a presence run
         const val G_SEAM_MS = 6_000L          // handover must be near-immediate to be "seamless"
         const val EPS_RSSI = 8.0              // dB; one radio's step-to-step RSSI

@@ -11,9 +11,11 @@ import org.soulstone.vigil.model.TrackerEcosystem
  *
  * Thresholds are adapted from AirGuard's field-tuned model (≥3 sightings, N
  * distinct locations, T minutes) with one deliberate addition AirGuard omits: an
- * **RSSI proximity gate**. A tracker must have been genuinely close at least once
- * (max RSSI ≥ floor) before it can alert — this rejects "a Tile in a car beside
- * you at two red lights." See research brief §3.5 / §4.
+ * **RSSI proximity gate**: the raw peak RSSI must reach the floor at least once.
+ * It is coarse — −85 dBm at the default is reachable from tens of metres — so it
+ * only rejects tags that never came even moderately near. "A Tile in a car beside
+ * you at two red lights" is rejected by the 15-minute debounce below, not by this
+ * gate. See research brief §3.5 / §4.
  *
  * This is the honest, shippable v1. The rotation-robust "detect the attack, not
  * the device" layer (problem #1) is being designed separately and slots in as an

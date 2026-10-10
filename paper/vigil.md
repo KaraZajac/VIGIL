@@ -19,9 +19,9 @@ it **keys on a device identity** and alarms when the *same* identifier is seen
 repeatedly while moving with the victim. This assumption fails in two directions.
 It uses the decisive temporal signal — recurrence across the victim's *changing*
 locations — only weakly; and it is defeated outright by identity-rotating clones —
-a commodity ESP32 firmware that cycles ~2,000 Find My keys (a fresh one every
-~30 s) tracked a victim for five days while raising **zero** alerts on every tool
-tested.
+in a 2022 test, a commodity ESP32 firmware that cycles ~2,000 Find My keys (a fresh
+one every ~30 s) tracked a consenting test subject for five days without raising a
+single alert [7].
 
 We present **VIGIL**, an Android application that reframes the problem as
 *temporal co-movement*: not "is a tracker near me" but "has *the same* tracker
@@ -56,10 +56,12 @@ reports the target's location without any infrastructure of the attacker's own.
 
 Platform vendors responded with **unwanted-tracking alerts**, and the security
 community produced **AirGuard** (TU Darmstadt), the best open-source detector.
-These tools work, in their measured evaluations, *slowly and narrowly*: an
-in-the-wild study found an iPhone took 5 h 41 m to alert on an AirTag (and only on
-reaching home Wi-Fi), never detected a Chipolo, and that Samsung's own app never
-found its own SmartTag. All of them share the same core algorithm — **count
+These tools have worked, in their measured evaluations, *slowly and narrowly*: in a
+February 2023 field test, an iPhone took 5 h 41 m to alert on an AirTag, shortly
+after joining its home Wi-Fi, and never detected a Chipolo, while Samsung's own app
+never found its own SmartTag [12]. That test and the 2022 clone test below both
+predate the cross-platform alerts Apple and Google shipped in May 2024 [16]. All of
+these detectors share the same core algorithm — **count
 repeat sightings of one BLE identifier; alarm past a threshold** — and all of
 them inherit its two structural weaknesses:
 
@@ -71,8 +73,10 @@ them inherit its two structural weaknesses:
    *rotates* its identifier faster than the accumulation window is invisible.
    Positive Security's *Find You* clone exploits exactly this: ~2,000 pre-loaded
    Find My public keys, one broadcast every ~30 s, so every sighting looks like a
-   brand-new device. In a five-day carry test it defeated iOS, Apple's Tracker
-   Detect, and AirGuard's background detection.
+   brand-new device. In a five-day carry test in February 2022, the tracked iPhone
+   user got no alert, Apple's Tracker Detect found nothing, and AirGuard's manual
+   scan showed only a stream of one-off devices; AirGuard's background mode was not
+   tested [7].
 
 **VIGIL** is built on the opposite premise. Where OVERWATCH (its sibling project)
 asks *what is watching this place*, VIGIL asks *what has been with me* — it is a
@@ -81,9 +85,10 @@ temporal detector. Its contributions:
 - **A cross-ecosystem, on-device temporal detector.** VIGIL parses Apple Find My,
   Google FMDN, Samsung SmartTag, Tile, and the unified DULT format, filters to the
   separated-from-owner state where signalled, and escalates a device only when it
-  clears a **co-movement test** across the user's distinct geographic cells — gated
-  by an **RSSI proximity check** that AirGuard omits, which rejects the "tracker in
-  a passing car" false positive.
+  clears a **co-movement test** across the user's distinct geographic cells, with an
+  **RSSI proximity check** that AirGuard lacks, though a coarse one (§4.2). The
+  "tracker in a passing car" false positive is rejected by counting each tag at
+  most once per 15 minutes.
 - **A learned, on-device baseline.** VIGIL learns the places a user dwells and
   auto-trusts trackers that recur there across days — the user's own AirTag, a
   partner's Tile — collapsing the dominant benign false-positive class without a
@@ -265,10 +270,13 @@ tracker is scored on:
 - **Distinct places** — the number of distinct **geohash-7 cells** (~153 m) among
   its sightings. Require ≥ N, with N = 2/3/4 by sensitivity (high/medium/low).
 - **Span** — first-to-last minutes. Require ≥ T, with T = 30/45/90 min.
-- **RSSI proximity gate** — the smoothed peak RSSI must at least once cross an
-  on-body/in-bag floor (−90/−85/−80 dBm by sensitivity). **This is the piece
-  AirGuard omits**, and it is what distinguishes a tracker *on* the user from one
-  that merely shared a road with them at two lights.
+- **RSSI proximity gate** — the raw peak RSSI must at least once reach −90/−85/−80
+  dBm by sensitivity. **AirGuard has no such check.** It is a coarse gate, though:
+  a tag can reach −85 dBm from well outside the user's bag, often tens of metres
+  away in open air, so it only rejects tags that never came even moderately near.
+  A tracker that merely shared a road with the user at a few red lights is stopped
+  by the debounce instead: it counts at most once per 15 minutes, so a short
+  stretch side by side never reaches three sightings.
 
 A device escalates `OBSERVED → SUSPICIOUS → ALERTING` (`detect/CoMovementEvaluator.kt`).
 ALERTING requires all four conditions; SUSPICIOUS requires repeated close sightings
@@ -305,7 +313,7 @@ The *Find You* clone is one physical ESP32 radio that broadcasts a pool of ~2,00
 Apple Find My public keys, cycling to a new one every ~30 s. To any identity-keyed
 detector each key is a new device seen once, so the "same identifier ≥ 3 times"
 counter never accumulates and the detector stays silent — measured at zero alerts
-over five days.
+over five days in Positive Security's 2022 test [7].
 
 ### 5.2 The exploitable invariant
 
@@ -538,6 +546,10 @@ advice must be given with situational-safety caveats.
 - **Duty cycling (§7).** Silences longer than 20 s reset the presence run, so an
   intermittently transmitting clone is not detected; the reacquire rule of the
   design document is not yet implemented.
+- **Self-reported separation.** VIGIL takes a tag's separated-state flag on trust.
+  A tracker with no separated sighting stays OBSERVED, and only separated sightings
+  reach the presence engine, so a modified tag that always claims its owner is
+  nearby never escalates. Tile, which has no such flag, is the exception.
 - **Not yet field-evaluated.** §7's results are synthetic.
 
 ---
@@ -586,15 +598,16 @@ invite the field evaluation §7 lays out.
 4. N. Shafqat et al. "Track You: A Deep Dive into Safety Alerts for Apple AirTags." *PoPETs* 2023. https://petsymposium.org/popets/2023/popets-2023-0102.pdf
 5. T. Yu et al. "Analyzing the Security of Samsung SmartTag." *USENIX Security* 2024. https://arxiv.org/pdf/2210.14702
 6. Kumar, Raymaker, Specter. Tile protocol analysis. 2025. https://arxiv.org/html/2510.00350v1
-7. F. Bräunlein / Positive Security. "Find You: Building a stealth AirTag clone." https://positive.security/blog/find-you · https://github.com/positive-security/find-you
+7. F. Bräunlein / Positive Security. "Find You: Building a stealth AirTag clone." 21 Feb 2022. https://positive.security/blog/find-you · https://github.com/positive-security/find-you
 8. A. Catley. "AirTag reverse engineering." https://adamcatley.com/AirTag.html
 9. IETF DULT WG. "Detecting Unwanted Location Trackers" (accessory-protocol; threat-model). https://datatracker.ietf.org/wg/dult/
 10. Google. "Find My Device network (Fast Pair FMDN) specification." https://developers.google.com/nearby/fast-pair/specifications/extensions/fmdn
 11. SEEMOO-Lab. "OpenHaystack." https://github.com/seemoo-lab/openhaystack
-12. "Stop Following Me! Evaluating the Effectiveness of Anti-Stalking Features." *EuroUSEC* 2024. https://arxiv.org/abs/2312.07157
+12. K. I. Turk, A. Hutchings. "Stop Following Me! Evaluating the Effectiveness of Anti-Stalking Features of Personal Item Tracking Devices." *EuroUSEC* 2024 (tests run February 2023). https://arxiv.org/abs/2312.07157
 13. E. S. Page. "Continuous Inspection Schemes." *Biometrika* 41, 1954. (CUSUM.)
 14. M. Basseville, I. Nikiforov. *Detection of Abrupt Changes: Theory and Application.* 1993.
 15. M. Datar, A. Gionis, P. Indyk, R. Motwani. "Maintaining Stream Statistics over Sliding Windows." *SODA* 2002.
+16. Apple Newsroom. "Apple and Google deliver support for unwanted tracking alerts in iOS and Android." 13 May 2024. https://www.apple.com/newsroom/2024/05/apple-and-google-deliver-support-for-unwanted-tracking-alerts-in-ios-and-android/
 
 *This working paper accompanies the VIGIL reference implementation. The rotation-clone
 engine (§5) is specified in `docs/detection-rotation-clone.md` and implemented as a

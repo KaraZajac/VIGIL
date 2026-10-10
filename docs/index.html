@@ -181,7 +181,7 @@
       <article class="bento-card">
         <div class="bento-icon">📶</div>
         <h3>RSSI proximity gate</h3>
-        <p>It must have been genuinely close — on-body / in-bag — at least once. This is the piece AirGuard omits; it rejects "a Tile in a passing car."</p>
+        <p>Its peak signal must reach −85 dBm at least once at the default setting. AirGuard has no such check, though it's a coarse one: a tag can clear it from tens of metres away. What stops "a Tile in the next car at a few red lights" is the debounce — each tag counts once per 15 minutes, so it never adds up.</p>
       </article>
     </div>
 
@@ -262,8 +262,9 @@
         Every shipping detector — AirGuard, iOS, Android's built-in — keys on
         <strong>device identity</strong>. A key-rotating clone (Positive
         Security's <em>Find You</em>: ~2,000 Find My keys, a new one every 30 s)
-        looks like 2,000 one-off devices and evades them all — it tracked a
-        phone for five days with zero alerts.
+        looks like 2,000 one-off devices to all of them. In Positive
+        Security's 2022 test it tracked a phone for five days with zero
+        alerts.
       </p>
     </div>
 

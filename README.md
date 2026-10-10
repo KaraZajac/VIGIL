@@ -57,7 +57,9 @@ transmitted unless you tap it.
 Four native BLE wire formats today, plus the emerging unified DULT format. VIGIL
 recognises each ecosystem and, where the ecosystem signals it, filters to the
 **separated-from-owner** state — the only state in which a following tracker is
-detectable (see the research brief).
+detectable (see the research brief). VIGIL takes that flag on trust, so a modified
+tag that always claims its owner is nearby is never escalated. Tile has no such
+flag, so every Tile is checked.
 
 | Ecosystem | BLE signature | Separated-state signal | Passive re-link window |
 |---|---|---|---|
@@ -79,9 +81,11 @@ clears the **co-movement test**:
 - **≥ 3 sightings** (debounced to one per 15 min), across
 - **≥ N distinct places** (geohash-7 cells; N = 2/3/4 by sensitivity), over
 - **≥ T minutes** (30/45/90 by sensitivity), **and**
-- an **RSSI proximity gate** — it must have been genuinely close (on-body/in-bag)
-  at least once. This is the piece AirGuard omits, and it rejects "a Tile in a
-  passing car."
+- an **RSSI proximity gate** — its peak signal must have reached −85 dBm at
+  least once at the default setting (−90/−80 on High/Low). AirGuard has no such
+  check, but it's a coarse one: a tag can clear it from tens of metres away. What
+  stops "a Tile in the next car at a few red lights" is the debounce above. Each
+  tag counts once per 15 minutes, so a short stretch side by side never adds up.
 
 Two trust signals suppress false alarms:
 
@@ -107,8 +111,10 @@ Tap any tracker for two ways to physically locate it:
 
 Every shipping detector (AirGuard, iOS, Android's built-in) keys on **device
 identity**. A key-rotating clone (e.g. Positive Security's *Find You*: ~2,000
-Find My keys, a new one every 30 s) looks like 2,000 one-off devices and evades
-all of them — it tracked a phone for 5 days with zero alerts.
+Find My keys, a new one every 30 s) looks like 2,000 one-off devices to every one
+of them. In Positive Security's 2022 test it tracked a phone for five days
+with zero alerts, and AirGuard's manual scan showed only a stream of one-off
+devices.
 
 VIGIL's headline goal is to detect the **attack, not the device**: a rotating
 clone is one physical radio holding an unbroken, close-range, co-moving RF

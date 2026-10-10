@@ -17,7 +17,9 @@ threshold (AirGuard: the *same* identifier seen **≥ 3 times across a location
 change**). A key-rotating clone (Positive Security's **Find You**: an ESP32
 cycling **2000** Find My public keys, a new one every **~30 s**) presents each
 sighting as a brand-new device, so the repeat count never accumulates. In the
-authors' 5-day carry test, **no tool raised any passive alert.**
+authors' 5-day carry test in February 2022, **no tool raised any passive alert**;
+AirGuard's manual scan listed the clone only as one new device per beacon, and its
+background mode was not tested.
 
 VIGIL's differentiator: **stop tracking identities, start tracking the *presence*.**
 Ask *"is there one physical radio maintaining an unbroken, close-range, co-moving
@@ -72,7 +74,8 @@ Only separated-state beacons are relevant: a tracker with its owner is
 nearby/connectable (no threat). A tracker following you without its owner is by
 definition separated and broadcasts its full key every 2 s. VIGIL filters to
 `separated == true` — this cuts noise and is exactly the population the clone
-must join.
+must join. That holds for honest firmware only: a modified tag can advertise the
+near-owner state forever, and VIGIL then never escalates it (paper §10).
 
 ### 1.4 The three core computable quantities
 
@@ -353,7 +356,7 @@ Real, not hype: the attack must maintain a continuous coherent co-moving presenc
 to function; the standards mandate 24 h rotation, giving a *categorical* anomaly
 baseline; the identity×churn squeeze can leave no safe rate once both paths reach
 far enough (v1's do not yet — §4.1); and VIGIL strictly dominates incumbents on
-the published attack (they raise zero alerts on Find You; in offline replay VIGIL
+the published attack (they raised zero alerts on Find You in 2022; in offline replay VIGIL
 raises one). Research-grade long shots: robust low-FP detection in live rush-hour
 transit, and a patient low-duty-cycle adaptive attacker (provably forced to
 multi-session/days latency).
