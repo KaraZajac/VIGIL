@@ -91,6 +91,10 @@ the simulation models path loss and mobility, not antennas, bodies, or buildings
 The last two rows are the point. They are the two soft spots the harness found, and
 confirming them on hardware is what turns a simulation result into a finding.
 
+No setting here reproduces the published *Find You* firmware, which sends one
+advert per key and then stays silent for 30 s. The harness replays that timing
+separately (`SimTraces.findYouFirmware`) and predicts that neither path fires.
+
 ## Reading the result
 
 VIGIL's own detail sheet is the readout: open the tracker card for "Co-movement

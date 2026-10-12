@@ -6,14 +6,14 @@
 <title>VIGIL — what's been following you?</title>
 <meta name="description" content="A native Android app that watches for personal item-trackers — AirTags, Tile, Samsung SmartTags, Google Find My — travelling with you over time. Fully offline, no INTERNET permission. The temporal counterpart to OVERWATCH.">
 <meta property="og:title" content="VIGIL — what's been following you?">
-<meta property="og:description" content="Android app that flags AirTags, Tile, SmartTags & Find My trackers travelling WITH you over time — even fast-rotating key clones. Fully offline, no internet permission.">
+<meta property="og:description" content="Android app that flags AirTags, Tile, SmartTags & Find My trackers travelling WITH you over time, plus an experimental detector for key-rotating clones. Fully offline, no internet permission.">
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://vigil.netslum.io/">
-<meta property="og:image" content="https://vigil.netslum.io/og.png?v=2">
+<meta property="og:image" content="https://vigil.netslum.io/og.png?v=3">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
 <meta name="twitter:card" content="summary_large_image">
-<meta name="twitter:image" content="https://vigil.netslum.io/og.png?v=2">
+<meta name="twitter:image" content="https://vigil.netslum.io/og.png?v=3">
 <meta name="theme-color" content="#07070d">
 <link rel="icon" type="image/svg+xml" href="logo.svg">
 
@@ -70,6 +70,7 @@
       <img class="phone" src="img/vigil-main.png?v=2" width="1096" height="2280"
         alt="VIGIL main screen (earlier build): a green &quot;You're clear — nothing has been following you&quot; card, a Stop Watching button, and a High/Medium/Low sensitivity selector." loading="eager">
     </div>
+    <p class="tl-foot" style="text-align:center;margin-top:.4rem">Screenshot from an earlier build (0.1.7). Since 0.1.13, VIGIL says only what it observed: &ldquo;All quiet: No tracker seen moving with you.&rdquo;</p>
 
     <div class="stats-row" id="stats-row">
       <div class="stat-chip"><span class="num" data-target="5">0</span><span>tracker ecosystems</span></div>
@@ -264,11 +265,11 @@
       <h2>Catching the clone.</h2>
       <p class="lead">
         Every shipping detector — AirGuard, iOS, Android's built-in — keys on
-        <strong>device identity</strong>. A key-rotating clone (Positive
-        Security's <em>Find You</em>: ~2,000 Find My keys, a new one every 30 s)
-        looks like 2,000 one-off devices to all of them. In Positive
-        Security's 2022 test it tracked a phone for five days with zero
-        alerts.
+        <strong>device identity</strong>, so a key-rotating clone looks like a
+        stream of one-off devices to all of them. Positive Security's
+        <em>Find You</em> (2022) sends one beacon per key, one every 30 s, from
+        ~2,000 Find My keys. Carried by an iPhone user for five days, it raised
+        no alert on their iPhone.
       </p>
     </div>
 
@@ -277,19 +278,21 @@
       <div>
         <h3>Detect the attack, not the device</h3>
         <p>
-          A rotating clone is <em>one</em> physical radio holding an unbroken,
-          close-range, co-moving RF presence — even as its identity churns
-          thousands of times faster than any standards-compliant tracker is
-          allowed to. VIGIL's <code>PresenceEngine</code> tracks that presence
-          instead of the identity: it counts seamless hand-overs to never-seen
+          A rotating clone is <em>one</em> physical radio that stays close and
+          moves with you while its identity churns thousands of times faster
+          than any standards-compliant tracker is allowed to. If it keeps
+          advertising, that is an unbroken, close-range, co-moving RF presence,
+          and VIGIL's <code>PresenceEngine</code> tracks that presence instead
+          of the identity: it counts seamless hand-overs to never-seen
           identities and gates the alarm on co-movement. In offline replay it
-          confirms the published <em>Find You</em> setting in about six minutes.
-          It does not catch everything yet. At the default sensitivity, a
+          confirms a clone that switches keys every 30 s and never pauses in
+          about six minutes. It does not catch everything yet. The published
+          <em>Find You</em> firmware slips past it: one beacon per key, then
+          30 s of silence, and any silence over 20 s ends the clone detector's
+          run. So does a fast-rotating clone that cycles its radio on and off
+          (30 s on, 30 s off in our tests), and at the default sensitivity, a
           clone that rotates every ~85 seconds to ~45 minutes (30 min on High,
-          90 min on Low) slips past both of VIGIL's detectors today, and so
-          does a fast-rotating clone that cycles its radio on and off (30 s
-          on, 30 s off in our tests), because any silence over 20 s ends the
-          clone detector's run. Nor does VIGIL
+          90 min on Low) slips past both of VIGIL's detectors. Nor does VIGIL
           watch across days yet: the identity test looks back 24 hours and the
           clone detector starts fresh each session. Closing those gaps, and
           testing on real hardware, are what remain.
@@ -324,7 +327,7 @@
       <article class="bento-card">
         <div class="bento-icon">🔔</div>
         <h3>Make it ring</h3>
-        <p>Ask a suspected tracker over GATT to play its own sound — the DULT-standard way for a victim to locate a hidden AirTag / Find My / Chipolo tag. VIGIL reports what the tracker answered, and a tag that refuses (as it must while with its owner) shows as refusing.</p>
+        <p>Ask a suspected tracker over GATT to play its own sound. AirTags get Apple's own command; Google Find My Device and DULT tags (Chipolo, Pebblebee, eufy, Motorola) get the DULT one, and Apple Find My accessories are supported too. A tag that refuses (as it must while with its owner) shows as refusing. An AirTag never replies, so VIGIL reports its command as accepted, or that it hung up, which an AirTag does after playing its sound.</p>
       </article>
       <article class="bento-card">
         <div class="bento-icon">🌡</div>
@@ -353,7 +356,7 @@
       </div>
       <div class="tl-col tl-next">
         <div class="tl-tag">3 · grant + scan</div>
-        <ul><li>Grant nearby-devices + location + notifications and keep location on (without a fix VIGIL can't count places, so it can't alert). Pick a sensitivity and tap Start Watching; it keeps watching in the background until you stop it or the phone restarts.</li></ul>
+        <ul><li>Grant nearby-devices + location + notifications and keep location on (without a fix VIGIL can't count places, so it can't alert). Pick a sensitivity and tap Start Watching; it keeps watching in the background until you stop it, the phone restarts, or Android closes the app.</li></ul>
       </div>
     </div>
     <p class="tl-foot">

@@ -1,13 +1,16 @@
 /*
  * VIGIL Emitter — a red-team beacon for validating the VIGIL tracker detector.
  *
- * WHAT IT IS. VIGIL's headline claim is that it detects identity-rotating tracker
- * clones (Positive Security's "Find You": ~2000 Apple Find My keys, a new one every
- * ~30 s) that every shipping detector misses. Validating that claim needs a
- * ground-truth-positive emitter — a real radio, carried by the researcher, that
- * co-moves and rotates its identity. Paper §7 and docs/detection-rotation-clone.md
- * §5 specify an ESP32 for the job; the Flipper's STM32WB55 does it with hardware
- * already in the pocket.
+ * WHAT IT IS. VIGIL's headline aim is to detect identity-rotating tracker clones,
+ * the attack Positive Security's "Find You" demonstrated (~2000 Apple Find My keys,
+ * one beacon per key every 30 s) and every shipping detector misses. v1 only
+ * catches clones that keep talking: any silence over 20 s resets it, so it misses
+ * Find You's own firmware. Validating either result needs a ground-truth-positive
+ * emitter — a real radio, carried by the researcher, that co-moves and rotates its
+ * identity. Paper §7 and docs/detection-rotation-clone.md §5 specify an ESP32 for
+ * the job; the Flipper's STM32WB55 does it with hardware already in the pocket. Its
+ * duty settings emit in 30 s windows, so none reproduces Find You's one beacon per
+ * key.
  *
  * WHY IT IS NOT A TRACKER. A real Find My beacon advertises a P-224 public key
  * registered to someone's Apple ID; that registration is what lets the owner pull

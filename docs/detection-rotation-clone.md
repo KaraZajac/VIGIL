@@ -1,6 +1,6 @@
 # VIGIL — Detecting Key-Rotating Tracker Clones by Presence, Not Identity
 
-**Design document · the core novel detection algorithm (problem #1) · v1 · 2026-07-14 · revised 2026-10-10**
+**Design document · the core novel detection algorithm (problem #1) · v1 · 2026-07-14 · revised 2026-10-11**
 
 Target: on-device Android (Kotlin), no server. Slots into VIGIL's `scan/` +
 `detect/` architecture. Both paths ship: the identity path in
@@ -16,20 +16,23 @@ unwanted-tracking alerts, and TU-Darmstadt's **AirGuard** — keys on **device
 identity**: it counts repeat sightings of one BLE identifier and alarms at a
 threshold (AirGuard: the *same* identifier seen **≥ 3 times at several distinct
 locations over at least 30, 60 or 120 minutes**, by sensitivity). A key-rotating
-clone (Positive Security's **Find You**: an ESP32 cycling **2000** Find My public
-keys, a new one every **~30 s**) presents each sighting as a brand-new device, so
-the repeat count never accumulates. In the
-authors' 5-day carry test in February 2022, **no tool raised any passive alert**;
-AirGuard's manual scan listed the clone only as one new device per beacon, and its
-background mode was not tested.
+clone (Positive Security's **Find You**: an ESP32 holding **2000** Find My public
+keys that sends **one beacon per key, one beacon every 30 s**) presents each
+sighting as a brand-new device, so the repeat count never accumulates. In the
+author's 5-day carry test in February 2022, neither the carrier's iPhone (iOS
+15.3.1) nor their roommate's raised an alert. In separate scans, Apple's Tracker
+Detect showed nothing, and AirGuard's manual scan listed the clone as one new
+device per beacon; AirGuard's background mode was not tested.
 
 VIGIL's differentiator: **stop tracking identities, start tracking the *presence*.**
 Ask *"is there one physical radio maintaining an unbroken, close-range, co-moving
-RF presence, even though no single identifier survives?"* This is detectable
-because the attack, to function as a tracker, must emit an **unbroken stream of
-separated-state beacons at roughly stable close-range RSSI that moves with the
-victim across locations where the ambient tracker population fully turns over.**
-Identity churn cannot hide that.
+RF presence, even though no single identifier survives?"* A clone that advertises
+continuously emits exactly that: an **unbroken stream of separated-state beacons
+at roughly stable close-range RSSI that moves with the victim across locations
+where the ambient tracker population fully turns over**, and identity churn cannot
+hide it. Nothing forces a clone to advertise continuously, though. Find My can
+locate a tag from occasional beacons, and Find You's own firmware is silent for
+30 s after every beacon, which v1 misses (§2.7, §4.2).
 
 The most exploitable fact: **the standards mandate slow rotation.** IETF DULT,
 Apple, and Google all specify that a separated accessory rotates its address/key
@@ -92,8 +95,10 @@ Real separated tracker → ~0.0007/min. Find You @30 s → ~2/min. A ~2880× gap
 regardless of *who* occupies it?
 `o(t)=1 iff ∃ separated sighting in (t−δ,t] with rssi≥R_close` (δ = 10 s);
 `PC(W) = duty cycle of o`; `Runmax = longest run with no gap > g_break` (20 s).
-Clone → `PC≈1`, `Runmax` = whole session. A crowd also keeps it occupied, so
-`PC` alone is insufficient — it must be tied to coherence (§1.5) and co-movement.
+A nonstop clone → `PC≈1`, `Runmax` = whole session. Find You's firmware →
+`PC≈0.33` (one beacon per 30 s) and no run longer than one beacon. A crowd also
+keeps the band occupied, so `PC` alone is insufficient — it must be tied to
+coherence (§1.5) and co-movement.
 
 **(c) Co-movement `CM`** — did the presence follow you across a **population
 turnover**? The physics that makes this a *hard* discriminator — the **ambient
@@ -259,7 +264,9 @@ mode (§4.3, which would be opt-in) are not built.
 - **Tiers.** ≥ 40 WATCHING, ≥ 70 PROBABLE, ≥ 85 *and* coherent CONFIRMED. Only
   CONFIRMED notifies (2 h cooldown) and is saved to alert history; WATCHING and
   PROBABLE are never shown. CONFIRMED takes about 5–8 min of unbroken run (6.0 min
-  on the simulated Find You config).
+  for a simulated clone that switches keys every 30 s and never pauses). The
+  published Find You firmware never forms a run: each key is one beacon, then 30 s
+  of silence (§4.2).
 - **Not built:** txPower normalization, δ/PC occupancy, speed/V_MIN, the
   mode-change gate (§3.3), reacquire (§4.2), multi-session detection (§4.3).
 
@@ -319,7 +326,9 @@ slow → identity path; middle → both.
 
 **Measured, they don't (2026-10).** The offline replay harness
 (`app/src/test/kotlin/org/soulstone/vigil/eval/`) sweeps the rotation period of a
-carried clone through both shipped paths:
+carried clone that advertises every 2 s without pausing through both shipped
+paths (one that pauses for more than 20 s every few minutes defeats the churn path
+at any period, §4.2):
 
 | Sensitivity | Churn path catches | Identity path catches | Evades both |
 |---|---|---|---|
@@ -331,7 +340,7 @@ The identity-side premise was wrong. VIGIL's co-movement test needs three
 sightings de-duplicated to one per 15 min across the sensitivity's minimum span,
 so one identity must survive that whole span — and AirGuard is no different: its
 risk evaluator requires 30, 60 or 120 minutes of tracking by sensitivity. The churn
-ceiling is the v1 rate gate (`RHO_NOVEL_PER_MIN` = 0.7, one rotation per ~86 s).
+ceiling is the v1 rate gate (`RHO_NOVEL_PER_MIN` = 0.7, one rotation per 85.7 s, the "~85 s" above).
 The presence-continuity path *as designed* is rotation-rate-agnostic — slowing
 rotation lowers λ_novel but does nothing to the unbroken coherent co-moving
 close-band track — but v1 gates presence on churn rate, so that path does not exist
@@ -345,6 +354,7 @@ gets closed.
 | Slower rotation | λ_novel drops | identity path re-engages only past its minimum span (§4.1) | **low in v1** — a few-minute rotation evades both paths (measured) |
 | Variable TX power | RSSI jitter weakens coherence | design: normalize by advertised txPower. v1 has no normalization and leans on continuity + co-move + churn (harness: still CONFIRMED at σ 12 dB, latency 6 → 18.5 min) | med–high |
 | Intermittent duty-cycling | gaps reset runs | reacquire logic (designed, **not in v1**): a gap < G_reacq (3 min) resuming at coherent RSSI along your path = same presence; accumulate across gaps | **none in v1** — 30 s on / 30 s off is never detected (measured); medium once reacquire ships |
+| One beacon per key (Find You's published firmware) | every beacon is its own run; no handover within G_seam | none designed. Reacquire keeps a run alive across the 30 s gaps, but a handover still needs Δt ≤ G_seam (6 s), so the chain stays at 0. Counting novel ids that arrive across gaps would cover it, at an FP cost not yet measured | **none** — v1 misses it (measured, every beacon heard) |
 | Blend into transit | crowd cover | mode-change gate (§3.3; designed, not in v1, which relies on the coherence gate) | medium (needs latency) |
 
 ### 4.3 The true floor
@@ -359,7 +369,9 @@ RSSI/timing fingerprint matched across sessions). That trades **days of latency*
 and needs opt-in persistent storage. **The honest floor: a patient, low-duty-cycle
 adaptive attacker can be caught only by days-latency multi-session detection, which
 VIGIL does not have yet — and v1 is beaten well above that floor: it already misses
-a plain 50% duty cycle (§4.2).** Say so; don't claim an impossible guarantee.
+a plain 50% duty cycle, and the published Find You firmware at 30 regular,
+fixed-power beacons per 15 min (§4.2).** Say so; don't claim an impossible
+guarantee.
 
 ---
 
@@ -371,8 +383,8 @@ a plain 50% duty cycle (§4.2).** Say so; don't claim an impossible guarantee.
    `keyPoolSize`. Carried, it is a real co-moving emitter → ground-truth-positive
    without endangering anyone. *Status (2026-10):* built for the Flipper Zero
    instead (`flipper/vigil_emitter/`): rotation 30 s … static, duty 100% … 10%,
-   fixed TX power 0 … −40 dBm; no TX jitter, bursty duty or key pool; no field run
-   yet.
+   fixed TX power 0 … −40 dBm; no TX jitter, bursty duty, key pool, or Find You's
+   one-beacon-per-key timing; no field run yet.
 2. **Ambient baselines** (ground-truth-negative), by class: rural drive · suburban
    · dense-urban walk · bus · subway/rush-hour · highway · apartment · café. Paired
    runs (same route, emitter on/off). *Status:* none recorded yet.
@@ -384,7 +396,8 @@ a plain 50% duty cycle (§4.2).** Say so; don't claim an impossible guarantee.
    but replays synthetic traces only (`SimTraces`, a log-distance path-loss and
    mobility model); there is no recorder or JSONL yet.
 4. **Metrics:** TPR @ ≤ 1 FP / active-carry-day per class; detection latency
-   (attach → first CONFIRMED), target ≤ 10–15 min for default Find You; ROC/AUC;
+   (attach → first CONFIRMED), target ≤ 10–15 min for default Find You (v1 meets it
+   only for a clone that never pauses, not for Find You's firmware); ROC/AUC;
    robustness curves (TPR vs rotationPeriod / txPower / dutyCycle); ablations
    (churn-only → +coherence → +co-move gate → full).
 
@@ -395,26 +408,30 @@ a plain 50% duty cycle (§4.2).** Say so; don't claim an impossible guarantee.
 **Feasible enough to be VIGIL's headline — for a precisely scoped claim, with
 honest caveats.**
 
-Real, not hype: the attack must maintain a continuous coherent co-moving presence
-to function; the standards mandate 24 h rotation, giving a *categorical* anomaly
-baseline; the identity×churn squeeze can leave no safe rate once both paths reach
-far enough (v1's do not yet — §4.1); and on the published attack the incumbents
-raised zero alerts in the 2022 field test, while VIGIL raises one in offline replay
-of that configuration (no field run yet). Research-grade long shots: robust low-FP
-detection in live rush-hour transit, and a patient low-duty-cycle adaptive attacker
-(which pushes detection to multi-session, days-latency territory that VIGIL does not
-have; v1 already misses a 50% duty cycle).
+Real, not hype: a clone that advertises continuously holds a continuous coherent
+co-moving presence; the standards mandate 24 h rotation, giving a *categorical*
+anomaly baseline; the identity×churn squeeze can leave no safe rate once both paths
+reach far enough (v1's do not yet — §4.1); and on the published attack iOS raised
+no alert in the 2022 field test. VIGIL v1 alerts in offline replay on a clone with
+Find You's 30 s rotation that never pauses, but not on Find You's own firmware,
+which pauses for 30 s after every beacon (no field run yet). Research-grade long
+shots: robust low-FP detection in live rush-hour transit, and a patient
+low-duty-cycle adaptive attacker (which pushes detection to multi-session,
+days-latency territory that VIGIL does not have; v1 already misses a 50% duty
+cycle and Find You's firmware).
 
-**Minimum viable version (shipped as v1, §2.7).** Target the published Find You
-config (30 s, fixed power, ~100% duty) — the exact attack no tool alerted on in the
-2022 test: a fixed churn gate (≥ 12 novel seamless handovers at ≥ 0.7/min) in place of
-the CUSUM trigger, a presence track counting novel *seamless* handovers with RSSI
-coherence, and a hard co-movement gate (≥ 500 m, ≥ 3 cells). Only CONFIRMED
-(score ≥ 85 and coherent) alerts, as its own notification distinct from the
-identity-based alert, while the classic identity detector runs in parallel. In
-offline replay it reaches CONFIRMED in ~6 min on the simulated Find You config,
-with no alerts on the dense-urban, at-home or rush-hour traces. The ~10–15 min
-real-world target is not yet field-tested, and v1 has the gaps of §4.1 and §4.2.
+**Minimum viable version (shipped as v1, §2.7).** Target a clone with Find You's
+30 s rotation and fixed power that advertises continuously, which the published
+firmware does not (it sends one beacon per key, then 30 s of silence): a fixed
+churn gate (≥ 12 novel seamless handovers at ≥ 0.7/min) in place of the CUSUM
+trigger, a presence track counting novel *seamless* handovers with RSSI coherence,
+and a hard co-movement gate (≥ 500 m, ≥ 3 cells). Only CONFIRMED (score ≥ 85 and
+coherent) alerts, as its own notification distinct from the identity-based alert,
+while the classic identity detector runs in parallel. In offline replay it reaches
+CONFIRMED in ~6 min on that simulated nonstop clone, with no alerts on the
+dense-urban, at-home or rush-hour traces, and never on Find You's own timing. The
+~10–15 min real-world target is not yet field-tested, and v1 has the gaps of §4.1
+and §4.2.
 
 ---
 

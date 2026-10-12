@@ -48,12 +48,16 @@ VIGIL requests **no `INTERNET` permission at all.** There is no server, no accou
 no telemetry. Every tracker, every sighting, and the entire learned baseline live
 in an on-device SQLite database. VIGIL never transmits them and cloud backup is
 off; they leave the phone only if you export an evidence report yourself.
+Sightings older than 14 days are deleted while VIGIL is watching (when you start
+it, then every 6 hours), so they stay on the phone while it's stopped. Alerts, with
+their locations, stay until you clear Alert history, and learned places stay until
+you clear the app's storage.
 **Detection listens to what trackers already broadcast and never connects to
 them.** The one exception is the user-initiated **"Make it ring"** action, which
-connects to a tracker you already suspect and asks it to play a sound (the
-DULT-standard way for a victim to locate a hidden tag). Your phone's Bluetooth
-scan can send generic scan requests, as any scan does, but VIGIL sends no data
-anywhere.
+connects to a tracker you already suspect and asks it to play a sound (the way
+Apple and the DULT standard let someone find a tag that isn't theirs). Your
+phone's Bluetooth scan can send generic scan requests, as any scan does, but VIGIL
+sends no data anywhere.
 
 ---
 
@@ -79,9 +83,10 @@ network (Apple or Google) their SKU joined — VIGIL detects the **network**.
 
 ## How it decides
 
-Each parsed sighting is geotagged with a coarse fix and written to the temporal
-store, and each tracker's last 24 hours are judged. Once VIGIL has seen it
-separated from its owner (a Tile always counts), a tracker becomes `SUSPICIOUS`
+VIGIL stores at most one sighting per tracker every 15 seconds, tagged with the
+phone's current location fix when it has one, and judges each tracker's last 24
+hours. Once VIGIL has seen it separated from its owner (a Tile always counts), a
+tracker becomes `SUSPICIOUS`
 with three spaced sightings and a peak that passed the RSSI gate, and `ALERTING` —
 the only state that notifies — when it clears the full **co-movement test**:
 
@@ -129,16 +134,19 @@ Tap any tracker for two ways to physically locate it:
 ## The hard part — catching clones (problem #1)
 
 Every shipping detector (AirGuard, iOS, Android's built-in) keys on **device
-identity**. A key-rotating clone (e.g. Positive Security's *Find You*: ~2,000
-Find My keys, a new one every 30 s) looks like 2,000 one-off devices to every one
-of them. In Positive Security's 2022 test it tracked a phone for five days
-with zero alerts, and AirGuard's manual scan showed only a stream of one-off
-devices.
+identity**, so a key-rotating clone looks like a stream of one-off devices to every
+one of them. Positive Security's *Find You* (2022) holds ~2,000 Find My keys and
+sends one beacon per key, one beacon every 30 s, so a key recurs only every ~17
+hours. An iPhone user carried it for five days, and neither their iPhone nor their
+roommate's raised an alert. Apple's Tracker Detect scan didn't show it, and
+AirGuard's manual scan listed it as a new device per beacon; AirGuard's background
+mode wasn't tested.
 
 VIGIL's headline goal is to detect the **attack, not the device**: a rotating
-clone is one physical radio holding an unbroken, close-range, co-moving RF
-*presence* even as its identity churns thousands of times faster than any
-standards-compliant tracker is allowed to. The full algorithm — a CUSUM churn
+clone is one physical radio that stays close and moves with you while its identity
+churns thousands of times faster than any standards-compliant tracker is allowed
+to. If it keeps advertising, that is an unbroken, close-range, co-moving RF
+*presence*, whatever ID it shows. The full algorithm — a CUSUM churn
 trigger, an identity-agnostic presence-track confirmer, and a co-movement gate,
 plus the "identity-path × churn-path squeeze" meant to leave no safe rotation
 rate — is designed in **[docs/detection-rotation-clone.md](docs/detection-rotation-clone.md)**.
@@ -146,17 +154,23 @@ A first version is implemented in `detect/PresenceEngine.kt` and wired into the
 scan service to raise a distinct rotating-tracker alert.
 
 **What it catches today**, measured in an offline replay harness on synthetic
-traces (`app/src/test/kotlin/org/soulstone/vigil/eval/`): the published *Find You*
-configuration, a new key every 30 s, is confirmed in about 6 minutes of walking,
-with no alert in dense-urban, at-home or rush-hour-transit ambient traces.
+traces (`app/src/test/kotlin/org/soulstone/vigil/eval/`): a clone that switches
+keys every 30 s and advertises every 2 s without pausing is confirmed in about 6
+minutes of walking, with no alert in dense-urban, at-home or rush-hour-transit
+ambient traces.
 
-**What it doesn't:** the squeeze is not closed by the shipped thresholds. A tracker
-that rotates every ~85 seconds to ~45 minutes evades both detectors at the default
-sensitivity (to 30 min on High, 90 min on Low), and a fast-rotating clone that
-cycles its radio on and off (30 s on, 30 s off in the harness) is never detected,
-because any silence over 20 s ends the clone detector's run. Both are open work, and
-none of these results has been checked against real RF yet — the Flipper Zero
-emitter in [`flipper/vigil_emitter/`](flipper/vigil_emitter/) exists to do that.
+**What it doesn't:** the published *Find You* firmware. It sends each key in a
+single beacon and then stays silent for 30 s, and any silence over 20 s ends the
+clone detector's run, so every beacon starts again from zero; no key comes back
+soon enough for the identity path either. Replayed with that timing, every beacon
+heard, neither path alerts. The squeeze isn't closed by the shipped thresholds
+either. A tracker that rotates every ~85 seconds to ~45 minutes evades both
+detectors at the default sensitivity (to 30 min on High, 90 min on Low), and a
+fast-rotating clone that cycles its radio on and off (30 s on, 30 s off in the
+harness) is never detected, for the same 20-second reason. All of this is open
+work, and none of these results has been checked against real RF yet — the
+Flipper Zero emitter in [`flipper/vigil_emitter/`](flipper/vigil_emitter/) exists
+to do that.
 
 ## Architecture
 
@@ -168,7 +182,7 @@ scan/TrackerSignatures.kt   BLE hex signatures for every ecosystem
 scan/TrackerParser.kt       ScanResult -> TrackerObservation (five wire formats, incl. DULT)
 scan/BleTrackerScanner.kt   filtered BLE scan (screen-off capable) -> observations
 service/ScanService.kt      foreground service; geotags + persists + alerts
-data/db/VigilDatabase.kt    Room: trackers, sightings (14-day), alerts, baseline places
+data/db/VigilDatabase.kt    Room: trackers, sightings, alerts, baseline places
 data/TrackerRepository.kt   ingest + baseline + evaluate on every sighting
 data/settings/Settings.kt   preferences + a durable copy of the allowlist
 detect/CoMovementEvaluator  the temporal co-movement test + RSSI proximity gate
