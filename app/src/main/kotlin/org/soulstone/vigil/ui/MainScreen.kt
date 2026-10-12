@@ -199,7 +199,7 @@ fun MainScreen(
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             item { Spacer(Modifier.height(4.dp)) }
-            item { StatusHero(running, alerting, suspicious, scanFault, locationFault, recentAlert) }
+            item { StatusHero(running, alerting, suspicious, scanFault, locationFault, recentAlert, now) }
             item {
                 Button(
                     onClick = onStartStop,
@@ -247,14 +247,14 @@ fun MainScreen(
                 }
             } else {
                 items(active, key = { it.stableId }) { t ->
-                    TrackerCard(t, onClick = { detail = t }, onApprove = onApprove, onDistrust = onDistrust)
+                    TrackerCard(t, now, onClick = { detail = t }, onApprove = onApprove, onDistrust = onDistrust)
                 }
             }
 
             if (trusted.isNotEmpty()) {
                 item { SectionHeader("Trusted (${trusted.size})") }
                 items(trusted, key = { it.stableId }) { t ->
-                    TrackerCard(t, onClick = { detail = t }, onApprove = onApprove, onDistrust = onDistrust)
+                    TrackerCard(t, now, onClick = { detail = t }, onApprove = onApprove, onDistrust = onDistrust)
                 }
             }
 
@@ -304,7 +304,8 @@ private fun StatusHero(
     suspicious: Int,
     scanFault: String?,
     locationFault: String?,
-    recentAlert: AlertEntity?
+    recentAlert: AlertEntity?,
+    now: Long
 ) {
     data class Look(val title: String, val subtitle: String, val icon: ImageVector, val color: Color)
 
@@ -319,7 +320,7 @@ private fun StatusHero(
         // green the moment someone opened the app from the alert notification.
         recentAlert != null -> Look(
             if (recentAlert.trackerId == TrackerRepository.CLONE_TRACKER_ID) "Possible hidden tracker" else "Tracker alert",
-            "${recentAlert.label} flagged ${relative(recentAlert.timestamp)}. See Alert history.",
+            "${recentAlert.label} flagged ${relative(recentAlert.timestamp, now)}. See Alert history.",
             Icons.Filled.Warning, VigilRed
         )
         // A dead scan must never read as safety. This case used to be invisible, so
@@ -415,6 +416,7 @@ private fun SectionHeader(text: String) {
 @Composable
 private fun TrackerCard(
     t: TrackerEntity,
+    now: Long,
     onClick: () -> Unit,
     onApprove: (String, Boolean) -> Unit,
     onDistrust: (String) -> Unit
@@ -437,7 +439,7 @@ private fun TrackerCard(
             Column(Modifier.weight(1f)) {
                 Text(ecosystemDisplay(t.ecosystem), fontWeight = FontWeight.SemiBold)
                 Text(
-                    "${statusLabel(status)} · ${t.distinctPlaces} ${if (t.distinctPlaces == 1) "place" else "places"} · ${t.lastRssi} dBm · ${relative(t.lastSeen)}",
+                    "${statusLabel(status)} · ${t.distinctPlaces} ${if (t.distinctPlaces == 1) "place" else "places"} · ${t.lastRssi} dBm · ${relative(t.lastSeen, now)}",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -759,5 +761,9 @@ private fun explanation(s: TrackerStatus): String = when (s) {
 private fun ecosystemDisplay(name: String): String =
     runCatching { TrackerEcosystem.valueOf(name).display }.getOrDefault(name)
 
-private fun relative(ts: Long): String =
-    DateUtils.getRelativeTimeSpanString(ts, System.currentTimeMillis(), DateUtils.MINUTE_IN_MILLIS).toString()
+/** Pass MainScreen's ticking `now` wherever the text must age on screen. Reading the
+ *  clock in here alone froze "2 minutes ago" on cards and on the alert banner: their
+ *  inputs never changed, so Compose skipped them on every tick. Clamped so a sighting
+ *  newer than the last tick reads as now, not as the future. */
+private fun relative(ts: Long, now: Long = System.currentTimeMillis()): String =
+    DateUtils.getRelativeTimeSpanString(ts, maxOf(ts, now), DateUtils.MINUTE_IN_MILLIS).toString()
