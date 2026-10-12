@@ -41,28 +41,46 @@ class DetectionEvalTest {
     // ---- ground-truth positives ----------------------------------------------
 
     /**
-     * The published Find You configuration — 30 s rotation, 100% duty, fixed power,
-     * carried on the victim while walking. This is the attack that raised ZERO
-     * alerts on iOS, Tracker Detect and AirGuard over five days. Paper §7 targets
-     * detection within 10–15 min.
+     * A nonstop clone: Find You's 30 s key rotation, but advertising every 2 s with
+     * no pauses, at fixed power, carried on the victim while walking. This is what
+     * v1 is built to catch; the design doc targets detection within 10–15 min. It
+     * is not the published Find You firmware (see [findYouFirmwareIsMissedByV1]).
      */
     @Test
-    fun findYouCloneWalkingIsDetectedWithinFifteenMinutes() {
+    fun nonstopCloneWalkingIsDetectedWithinFifteenMinutes() {
         val trace = SimTraces.clone(
             SimTraces.CloneConfig(rotationMs = 30_000L),
             SimTraces.walk(), durationMs = 30 * minute, rng = rng()
         )
         val o = ReplayHarness.run(trace)
-        report("find-you clone, walking", o)
+        report("nonstop clone (30 s), walking", o)
 
         assertEquals(PresenceEngine.Tier.CONFIRMED, o.maxTier)
-        assertNotNull("clone path must alert on the Find You config", o.cloneAlertMs)
+        assertNotNull("clone path must alert on a nonstop 30 s clone", o.cloneAlertMs)
         assertTrue(
             "latency ${o.latencyMin()} min exceeds the paper's 15 min target",
             o.latencyMin()!! <= 15.0
         )
         // The whole point: the identity path is blind to this attack.
         assertNull("identity path is expected to be blind to a 30 s rotation", o.identityAlertMs)
+    }
+
+    /**
+     * The published Find You firmware: one beacon per key, then 30 s of silence. The
+     * 2022 test carried this for five days without an iPhone alert. v1 misses it:
+     * every gap exceeds G_BREAK_MS, so each beacon starts a fresh presence run with no
+     * handover, and no key recurs for the identity path. The README and paper §7 say
+     * so; if this ever alerts, update those claims.
+     */
+    @Test
+    fun findYouFirmwareIsMissedByV1() {
+        val trace = SimTraces.findYouFirmware(SimTraces.walk(), durationMs = 3 * 60 * minute, rng = rng())
+        val o = ReplayHarness.run(trace)
+        report("find-you firmware (1 beacon/30 s)", o)
+
+        assertEquals(0, o.maxSeamlessNovel)
+        assertNull("v1 is documented as missing Find You's firmware", o.cloneAlertMs)
+        assertNull("v1 is documented as missing Find You's firmware", o.identityAlertMs)
     }
 
     /** A spec-compliant separated tag (one identity for 24 h) is the identity path's job. */

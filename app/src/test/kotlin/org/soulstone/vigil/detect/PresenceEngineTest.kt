@@ -13,7 +13,7 @@ class PresenceEngineTest {
 
     private val stepMs = 2_000L
     private val steps = 900               // 30 min at 2 s
-    private val cloneRotationMs = 30_000L // Find You default
+    private val cloneRotationMs = 30_000L // Find You's key period, advertised nonstop here
 
     private fun maxTier(
         idAt: (Int) -> String,

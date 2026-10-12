@@ -24,6 +24,11 @@ import kotlin.math.sqrt
  * time gap; a crowd of many radios yields gappy, RSSI-incoherent handovers. Novel
  * churn is a *gate*, not just a score term: without it this is not a rotating
  * clone and the (separate) identity detector owns the case.
+ *
+ * So it only sees clones that keep talking. Any gap over [G_BREAK_MS] ends the run,
+ * and the published Find You firmware sends one beacon per key and then waits 30 s:
+ * every beacon starts a new run with no handover, and this engine never fires on it
+ * (DetectionEvalTest.findYouFirmwareIsMissedByV1).
  */
 class PresenceEngine {
 

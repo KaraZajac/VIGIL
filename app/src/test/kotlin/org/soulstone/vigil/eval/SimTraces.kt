@@ -15,9 +15,11 @@ import kotlin.math.sqrt
  * a seeded [Random], so a scenario replays bit-identically.
  *
  * These stand in for field captures until the real record/replay corpus exists:
- * the emitter model mirrors the published Find You configuration (2 s adverts,
- * ~30 s key rotation, carried on-body), and the ambient classes mirror the
- * ground-truth-negative environments of design doc §5.2.
+ * the emitter is a clone carried on-body that advertises every 2 s and rotates its
+ * key on a set period (30 s by default), and the ambient classes mirror the
+ * ground-truth-negative environments of design doc §5.2. That emitter is NOT the
+ * published Find You firmware, which sends one beacon per key and then stays silent
+ * for 30 s; [findYouFirmware] models that.
  */
 object SimTraces {
 
@@ -58,8 +60,8 @@ object SimTraces {
     // ---- the attack -----------------------------------------------------------
 
     /**
-     * Rotating-clone emitter carried by the victim. The published Find You config is
-     * rotation 30 s at 100% duty with fixed power; [sigmaDb] models per-advert RSSI
+     * Rotating-clone emitter carried by the victim, advertising every 2 s at fixed
+     * power and rotating its key every [rotationMs]. [sigmaDb] models per-advert RSSI
      * noise (raise it for the variable-TX-power adaptation), [onMs]/[offMs] model the
      * duty-cycling adaptation (design doc §4.2). A rotation longer than the trace
      * makes this a spec-compliant 24 h-class tag.
@@ -89,6 +91,18 @@ object SimTraces {
         }
         return out
     }
+
+    /**
+     * The published Find You firmware (positive-security/find-you,
+     * Firmware/ESP32/main/openhaystack_main.c): for each of ~2,000 keys it starts
+     * advertising, stops after the first beacon, then sleeps DELAY_IN_S = 30 s. One
+     * advert per key, one key per 30 s, so a key recurs only every ~17 h. Every
+     * beacon is heard here, the best case for a detector.
+     */
+    fun findYouFirmware(motion: Motion, durationMs: Long, rng: Random): List<SimSighting> = clone(
+        CloneConfig(rotationMs = 30_000L, onMs = ADV_INTERVAL_MS, offMs = 30_000L - ADV_INTERVAL_MS),
+        motion, durationMs, rng
+    )
 
     // ---- ambient (ground-truth-negative) classes ------------------------------
 
