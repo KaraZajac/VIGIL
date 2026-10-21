@@ -31,7 +31,7 @@ sustained window. VIGIL is built around that idea.
 ## Screenshots
 
 <p align="center">
-  <img src="docs/screenshots/main.png" width="230" alt="VIGIL main screen (earlier build, on a real phone): a You're clear card, the sensitivity selector, and an Active list of nearby trackers with It's mine buttons" />
+  <img src="docs/screenshots/main.png" width="230" alt="VIGIL main screen on a real phone: an All quiet card, the sensitivity selector set to High, and an Active list of 15 nearby trackers, DULT and Apple Find My at the top, each Seen nearby, with It's mine buttons" />
   &nbsp;
   <img src="docs/screenshots/finder-searching.png" width="230" alt="Hot/cold finder searching for a simulated Google Find My Device tag on an Android emulator: Searching… walk around, no signal yet" />
   &nbsp;
@@ -40,7 +40,7 @@ sustained window. VIGIL is built around that idea.
 
 <p align="center"><sub>The watch list &nbsp;·&nbsp; the hot/cold finder searching &nbsp;·&nbsp; homing in on a tracker, with “Make it ring”</sub></p>
 
-<p align="center"><sub>The watch list is from an earlier build on a real phone: the current app says “All quiet” where it said “You're clear”, and its header adds History and Safety buttons. The two finder shots are VIGIL 0.1.14 on an Android emulator, with a simulated Google Find My Device tag. The screens are the real app; the tag isn't.</sub></p>
+<p align="center"><sub>The watch list is from a real phone, with real trackers nearby. The two finder shots are VIGIL 0.1.14 on an Android emulator, with a simulated Google Find My Device tag. The screens are the real app; the tag isn't.</sub></p>
 
 ## Privacy first — fully offline
 
