@@ -20,6 +20,12 @@ A tracker being *near* you means nothing — trackers are everywhere. The signal
 **persistence**: the same device seen at many of *your* distinct locations, over a
 sustained window. VIGIL is built around that idea.
 
+A tracker doesn't have to be one of those brands, so VIGIL also lists every
+**other Bluetooth Low Energy device** it hears (headphones, watches, beacons,
+anything) and flags the ones that stay close while you move. That check has
+hard limits, the main one being that it can only follow a device that keeps the
+same Bluetooth address; see [Other Bluetooth devices](#other-bluetooth-devices).
+
 > ⚠️ **Prototype / work in progress.** The scanning, parsing, temporal store,
 > co-movement engine, allowlist, and learned baseline are in place; the app builds
 > in CI. Wire-format offsets come from published reverse-engineering (see the
@@ -40,7 +46,7 @@ sustained window. VIGIL is built around that idea.
 
 <p align="center"><sub>The watch list &nbsp;·&nbsp; the hot/cold finder searching &nbsp;·&nbsp; homing in on a tracker, with “Make it ring”</sub></p>
 
-<p align="center"><sub>The watch list is from a real phone, with real trackers nearby. The two finder shots are VIGIL 0.1.14 on an Android emulator, with a simulated Google Find My Device tag. The screens are the real app; the tag isn't.</sub></p>
+<p align="center"><sub>All three are VIGIL 0.1.14. The watch list is from a real phone, with real trackers nearby; 0.1.15 relabels it and adds the list of other Bluetooth devices below. The two finder shots are on an Android emulator, with a simulated Google Find My Device tag. The screens are the real app; the tag isn't.</sub></p>
 
 ## Privacy first — fully offline
 
@@ -49,9 +55,13 @@ no telemetry. Every tracker, every sighting, and the entire learned baseline liv
 in an on-device SQLite database. VIGIL never transmits them and cloud backup is
 off; they leave the phone only if you export an evidence report yourself.
 Sightings older than 14 days are deleted while VIGIL is watching (when you start
-it, then every 6 hours), so they stay on the phone while it's stopped. Alerts, with
-their locations, stay until you clear Alert history, and learned places stay until
-you clear the app's storage.
+it, then every 6 hours), so they stay on the phone while it's stopped. Other
+Bluetooth devices and their sightings go after 48 hours on the same schedule,
+except a device that raised an alert (kept like a tracker until you clear Alert
+history) and the row of a device you marked as yours. Alerts, with their
+locations, stay until you clear Alert history, and learned places stay until you clear the app's storage. To label
+your own things, VIGIL reads the list of devices paired with the phone; it shows
+the label and stores nothing from that list.
 **Detection listens to what trackers already broadcast and never connects to
 them.** The one exception is the user-initiated **"Make it ring"** action, which
 connects to a tracker you already suspect and asks it to play a sound (the way
@@ -90,17 +100,46 @@ tracker becomes `SUSPICIOUS`
 with three spaced sightings and a peak that passed the RSSI gate, and `ALERTING` —
 the only state that notifies — when it clears the full **co-movement test**:
 
-- **≥ 3 sightings** (debounced to one per 15 min), across
-- **≥ N distinct places** (geohash-7 cells; N = 2/3/4 by sensitivity), over
+- **≥ 3 sightings**, each counted once per 15 minutes, or sooner if you have
+  moved to a different place since the last one counted, across
+- **≥ N distinct places** (N = 2/3/4 by sensitivity), over
 - **≥ T minutes** (30/45/90 by sensitivity), **and**
 - an **RSSI proximity gate** — its peak signal must have reached −85 dBm at
   least once at the default setting (−90/−80 on High/Low). AirGuard has no such
   check, but it's a coarse one: a tag can clear it from tens of metres away. What
-  stops "a Tile in the next car at a few red lights" is the debounce above. Each
-  tag counts once per 15 minutes, so a short stretch side by side never adds up.
+  stops "a Tile in the next car at a few red lights" is the time: it has to stay
+  with you for half an hour or more. It may show as Watching while it does.
+
+Two positions are different places when they are over 300 m apart and further
+apart than their location fixes could be wrong by. A place seen for one position
+only, between positions somewhere else, is taken for a bad fix and not counted.
+Places used to be geohash-7 cells (about 150 m squares), and counting was by the
+clock alone. Day-long replays through the real tracker path
+(`eval/TrackerDayEvalTest.kt`; simulated days with a perfect radio, not field
+data) showed what that cost:
+
+| Scenario | Before | Now |
+|---|---|---|
+| A separated tag next door, heard all evening while the phone's position wanders 25 m | alerted on High in 36 of 50 homes | no alert |
+| The same with 100 m of wander | alerted in every home, at every setting | no alert |
+| A tag in the car on commutes of 4 to 14 minutes, departures varying by ±20 min | first flagged a day or more later | flagged on the first drive home |
+| A tag in a bag from 08:00 | High 08:30, Medium 08:45, Low 09:30 | unchanged |
 
 VIGIL needs location on: without a current fix it can't count places or
-movement, so neither detector can alert.
+movement, so none of its detectors can alert. With the phone's Location switch
+off it hears nothing at all: Android then gives VIGIL no Bluetooth scan results
+(its scans are not declared "never for location", since it geotags what it
+hears). The app and its notification say so instead of showing all quiet, and
+the scans are started afresh when Location comes back, because a scan started
+while Location was off stayed deaf afterwards on the Android 16 emulator.
+
+Android 14 and later move a scan that has run for several minutes into
+low-power mode, which listens about a tenth of the time. Android's default is 10
+minutes, and a phone's configuration can change it: it was 5 minutes on the
+Android 14 emulator image and 10 on Android 16's. VIGIL starts its tracker scan
+afresh every 4 minutes to stay at full rate, which only helps where the limit is
+longer than that. It costs battery, and how much has not been measured. While the
+phone sleeps with nothing to wake VIGIL, the restart waits for the next wake.
 
 Two trust signals suppress false alarms:
 
@@ -114,6 +153,73 @@ Two trust signals suppress false alarms:
   practice that's Tiles, the only tags that keep one identity for days; other
   household tags stay quiet because they don't travel with you, or report being
   near their owner.
+
+## Other Bluetooth devices
+
+A tracker can be built on any Bluetooth chip, or belong to a network VIGIL has no
+parser for. To a scanner it is then just another Bluetooth device, like a pair of
+headphones. So VIGIL lists everything else it hears under **Other devices
+nearby**, and runs a second, stricter co-movement test on it. Each row shows what
+the device broadcasts about itself (name, maker, the end of its address), whether
+it is paired with this phone, and the same **It's mine** button trackers have. The
+section has its own switch and is on by default.
+
+- **Listening.** About every 2 minutes VIGIL listens for everything for 12
+  seconds or a little longer. A device at −90 dBm or better is logged when it is
+  new, when the phone has moved 100 m since its last entry (or has a location fix
+  where that entry had none), or after 5 minutes; at most 96 per sweep, strongest
+  first. Anything else heard only updates "last heard". A sleeping phone may
+  stretch the 2 minutes; by how much has not been measured. No sweep runs while
+  the tracker scan is down or Location is off.
+- **Identity.** A device is its Bluetooth address and nothing else.
+- **Close only.** A sighting counts only at −85 / −80 / −75 dBm or stronger (High /
+  Medium / Low). Two positions are different places when they are over 300 m
+  apart and further apart than their location fixes could be wrong by. A place
+  seen for one position only, between positions somewhere else, is taken for a
+  bad fix and not counted, and a fix that claims to be worse than 5 km places
+  nothing.
+- **Watching** needs 2 places and 15 minutes. **Moving with you**, the only state
+  that notifies, needs **3 / 4 / 5 places over 1 / 2 / 3 hours** with 4 / 5 / 6
+  counted sightings. A sighting counts once per 15 minutes, or sooner if you have
+  moved to a different place since the last one counted.
+- **The alert** is its own, quieter notification. It says a device "may be
+  moving with you" and never says "tracker". One device alerts at most once every
+  4 hours. Marking a device as yours takes it out of the notification.
+
+What that does, in day-long scenario replays (`eval/NearbyDeviceEvalTest.kt`).
+These pin down the logic. They are not field data: none of this has run on a
+real phone against real devices yet.
+
+| Scenario | High | Medium | Low |
+|---|---|---|---|
+| In a bag, with you from 08:00 | flagged ~09:00 | ~10:00 | ~11:00 |
+| In the car, heard only while driving, 12 min or more each way | on the drive home | on the drive home | on the drive home |
+| Same, 8 min each way | on the drive home | on the drive home | **missed** |
+| Same, 6 min each way | on the drive home | **missed** | **missed** |
+| Same, 4 min each way | **missed** | **missed** | **missed** |
+| In the car but faint (−82 dBm) | on the drive home | **missed** | **missed** |
+| A stranger's device near you for one ride of 70 min | *false alarm* | quiet | quiet |
+| The same stranger on your train, both ways (25 min) | *false alarm* | *false alarm* | *false alarm* |
+| A colleague beside you all day, lunch and coffee included | *false alarm* | quiet | quiet |
+| A neighbour's TV, a shop beacon you pass daily | quiet | quiet | quiet |
+| Anything that changes its address every 15 min | **missed** | **missed** | **missed** |
+| No location fix | **missed** | **missed** | **missed** |
+
+What it can't do, however it is tuned:
+
+- **Follow a device that changes its address.** Phones and watches do, regularly
+  (the Bluetooth standard suggests every 15 minutes), so do some earbuds and other
+  accessories, and a tracker built to hide can too. Each new
+  address is a new device. This is the biggest gap, and the reason this list is a
+  second net, not a replacement for the tracker formats above.
+- **Tell a planted device from one that is simply travelling with you.** Your own
+  things, a companion's, a regular fellow commuter's, or a bus's own beacon give
+  exactly the pattern a planted device gives. Your own fixed-address gear will be
+  flagged, and flagged again on later days, until you mark it.
+- **Hear Bluetooth Classic.** Only Bluetooth Low Energy broadcasts are heard.
+  Many headphones and speakers send them as well as their audio link; some don't,
+  and those never appear.
+- **Vouch for the label.** Name, maker and address are whatever the device says.
 
 ## Finding a tracker
 
@@ -181,11 +287,16 @@ mission demands it (a persistent database instead of an in-memory store).
 scan/TrackerSignatures.kt   BLE hex signatures for every ecosystem
 scan/TrackerParser.kt       ScanResult -> TrackerObservation (five wire formats, incl. DULT)
 scan/BleTrackerScanner.kt   filtered BLE scan (screen-off capable) -> observations
+scan/NearbyDeviceScanner.kt every other BLE device, in short periodic sweeps
+scan/NearbyDeviceParser.kt  ScanResult -> observation keyed on the address
+scan/LeScanClient.kt        shared scan start/stop/restart + Android's start quota
 service/ScanService.kt      foreground service; geotags + persists + alerts
 data/db/VigilDatabase.kt    Room: trackers, sightings, alerts, baseline places
 data/TrackerRepository.kt   ingest + baseline + evaluate on every sighting
 data/settings/Settings.kt   preferences + a durable copy of the allowlist
 detect/CoMovementEvaluator  the temporal co-movement test + RSSI proximity gate
+detect/NearbyDeviceEvaluator  the stricter co-movement test for other devices
+detect/NearbyThrottle.kt    which swept devices are worth logging
 detect/PresenceEngine.kt    identity-agnostic rotation-clone engine (v1)
 detect/BaselineManager.kt   learns anchor places -> auto-trusts static-ID tags seen there
 ring/TrackerRinger.kt       user-initiated GATT "Make it ring"
@@ -222,7 +333,9 @@ Release on `v*` tags.
 Prototype. In place: BLE scan + filters, per-ecosystem parsing, Room temporal
 store, co-movement evaluator with RSSI gate, allowlist, learned baseline, the
 rotation-clone presence engine (v1, unit-tested), foreground service, Compose UI,
-"Make it ring" over GATT, and evidence export.
+"Make it ring" over GATT, evidence export, and the list and co-movement check of
+other Bluetooth devices (unit-tested on scenario replays and run on emulators with
+simulated devices; not yet on a phone).
 **Not yet:** closing the squeeze gap and duty-cycle evasion described above,
 watching across days (the identity test looks back 24 h and the clone engine
 starts fresh each session), restarting after a reboot, field-tuning the clone
@@ -236,7 +349,10 @@ Stands on the shoulders of **[AirGuard](https://github.com/seemoo-lab/AirGuard)*
 (TU Darmstadt / Seemoo-lab) and the SEEMOO Find My research, the IETF **DULT**
 working group, Adam Catley's AirTag teardown, and Positive Security's *Find You*
 clone research. VIGIL's aim is to go *beyond* AirGuard on the attacks it
-structurally cannot catch — see the design doc.
+structurally cannot catch — see the design doc. Maker names for other Bluetooth
+devices come from the Bluetooth SIG's Assigned Numbers company identifier list,
+bundled as `app/src/main/assets/bt_company_ids.tsv` (`tools/sig2tsv.py` rebuilds
+it from the SIG's file).
 
 ## License
 
