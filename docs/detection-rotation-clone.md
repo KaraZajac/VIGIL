@@ -337,8 +337,8 @@ at any period, §4.2):
 | Low | rotation ≤ ~85 s | identity held ≥ ~90 min | ~85 s – 90 min |
 
 The identity-side premise was wrong. VIGIL's co-movement test needs three
-sightings de-duplicated to one per 15 min across the sensitivity's minimum span,
-so one identity must survive that whole span — and AirGuard is no different: its
+counted sightings (one per 15 min, or sooner once the user has moved on) across
+the sensitivity's minimum span, so one identity must survive that whole span — and AirGuard is no different: its
 risk evaluator requires 30, 60 or 120 minutes of tracking by sensitivity. The churn
 ceiling is the v1 rate gate (`RHO_NOVEL_PER_MIN` = 0.7, one rotation per 85.7 s, the "~85 s" above).
 The presence-continuity path *as designed* is rotation-rate-agnostic — slowing

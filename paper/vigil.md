@@ -1,7 +1,7 @@
 # VIGIL: On-Device Temporal Detection of Personal Location Trackers, Including Identity-Rotating Clones
 
 **Kara Zajac** · Black Flag Intel
-Draft v0.3 · 2026-10-11 · *working paper, accompanies the VIGIL reference implementation*
+Draft v0.4 · 2026-11-13 · *working paper, accompanies the VIGIL reference implementation*
 
 ---
 
@@ -40,7 +40,10 @@ replay, rotation periods from about 85 seconds to about 45 minutes evade both
 detectors at the default sensitivity (§5.4), and a clone that falls silent for more
 than 20 seconds every few minutes is not detected (§7). The published *Find You*
 firmware is such a clone: it sends one beacon per key, then stays silent for 30
-seconds, and v1 does not detect it. VIGIL holds no network permission: the tracker
+seconds, and v1 does not detect it. As a second net for trackers it has no parser
+for, VIGIL also runs a stricter co-movement test over every other Bluetooth LE
+device it hears; it can only follow a device that keeps its address, and it cannot
+tell a planted device from a companion's (§4.4). VIGIL holds no network permission: the tracker
 database, the learned baseline, and all inference stay on the device unless the
 user exports an evidence report. We describe the per-ecosystem detection
 methodology, the temporal model, the presence engine, the implementation, and an
@@ -93,10 +96,10 @@ temporal detector. Its contributions:
 - **A cross-ecosystem, on-device temporal detector.** VIGIL parses Apple Find My,
   Google FMDN, Samsung SmartTag, Tile, and the unified DULT format, filters to the
   separated-from-owner state where signalled, and alerts on a device only when it
-  clears a **co-movement test** across the user's distinct geographic cells, with an
+  clears a **co-movement test** across the user's distinct places, with an
   **RSSI proximity check** that AirGuard lacks, though a coarse one (§4.2). The
-  "tracker in a passing car" false positive is rejected by counting each tag at
-  most once per 15 minutes.
+  "tracker in a passing car" false positive is rejected by time: a tag must stay
+  with the user for 30 to 90 minutes, by sensitivity.
 - **A learned, on-device baseline.** VIGIL learns the places a user dwells and
   auto-trusts trackers that recur there across days without co-moving — in
   practice static-identity tags such as a housemate's Tile, since daily-rotating
@@ -278,22 +281,29 @@ co-movement measure, and it needs no second trajectory.
 
 VIGIL writes at most one sighting per tracker every 15 s to an on-device store
 (`data/db/VigilDatabase.kt`) as `(trackerId, timestamp, rssi, separated, lat, lon,
-geohash7)`, tagged with the current fused-location fix; with no current fix the
-location fields stay empty. Sightings older than 14 days are deleted while VIGIL
+accuracy)`, tagged with the current fused-location fix and the radius it claims;
+with no current fix the location fields stay empty. Sightings older than 14 days are deleted while VIGIL
 is watching (§6). Over the trailing 24 h a tracker is scored on:
 
-- **Effective sightings** — raw sightings debounced to at most one per 15 min, so a
-  2 s-interval beacon cannot trivially inflate the count. Require ≥ 3.
-- **Distinct places** — the number of distinct **geohash-7 cells** (~153 m) among
-  its sightings. Require ≥ N, with N = 2/3/4 by sensitivity (high/medium/low).
+- **Effective sightings** — raw sightings counted at most once per 15 min, or
+  sooner when the user has moved on to a different place since the last one that
+  counted. A 2 s-interval beacon cannot inflate the count while the user sits
+  still, but a tag in a car counts as the car moves. Require ≥ 3.
+- **Distinct places** — positions clustered by distance (`detect/Places.kt`). Two
+  positions are different places when they are over 300 m apart *and* further
+  apart than their two fixes' claimed errors added together. Vague fixes are
+  clustered after precise ones, so a coarse first fix cannot swallow a journey.
+  A place visited for a single position between positions elsewhere (A, B, A) is
+  treated as a bad fix and not counted. Require ≥ N, with N = 2/3/4 by
+  sensitivity (high/medium/low).
 - **Span** — first-to-last minutes. Require ≥ T, with T = 30/45/90 min.
 - **RSSI proximity gate** — the raw peak RSSI must at least once reach −90/−85/−80
   dBm by sensitivity. **AirGuard has no such check.** It is a coarse gate, though:
   a tag can reach −85 dBm from well outside the user's bag, often tens of metres
   away in open air, so it only rejects tags that never came even moderately near.
   A tracker that merely shared a road with the user at a few red lights is stopped
-  by the debounce instead: it counts at most once per 15 minutes, so a short
-  stretch side by side never reaches three sightings.
+  by the span instead: it must stay with the user for T minutes. It can show as
+  SUSPICIOUS while it does.
 
 A device escalates `OBSERVED → SUSPICIOUS → ALERTING` (`detect/CoMovementEvaluator.kt`).
 ALERTING requires all four conditions; SUSPICIOUS requires three effective
@@ -303,6 +313,14 @@ never escalates (Tile, which has no flag, excepted). A sighting without a locati
 fix counts toward the sightings but not the places, so without location this path
 cannot alert. These thresholds are adapted from AirGuard's field-tuned model (≥3
 sightings, N distinct locations ≥150 m apart, T minutes) with the added RSSI gate.
+
+Up to v0.1.14, places were distinct **geohash-7 cells** (~153 m) and sightings
+were counted by the clock alone. Day-long replays (§7) showed what that cost. A
+phone's position wobbling at home across a cell edge made a second place, so a
+separated tag next door alerted on High in 36 of 50 simulated homes at 25 m of
+wobble, and in every home at every setting at 100 m. And a tag in a car on
+commutes under 15 minutes was first flagged a day or more later, because each
+drive counted once.
 
 ### 4.3 The learned baseline and the allowlist
 
@@ -323,6 +341,29 @@ in the user's life.
   identities re-roll at least daily (§3). Other household tags stay quiet because
   they don't travel with the user, or report being near their owner. (Dwell
   sampling is a v1; the roadmap replaces it with stay-point clustering.)
+
+### 4.4 Other Bluetooth devices
+
+A tracker can be built on any BLE chip, or belong to a network VIGIL has no parser
+for; to a scanner it is then just another Bluetooth device. As a second net, VIGIL
+watches every other BLE device it hears (`scan/NearbyDeviceScanner.kt`,
+`detect/NearbyDeviceEvaluator.kt`). It listens for everything in a 12 s sweep
+about every 2 minutes and keys each device on its advertising address alone,
+never its name. A device at −90 dBm or better is recorded when it is new, when
+the phone has moved 100 m since its last record, or every 5 minutes, at most 96
+per sweep, strongest first (`detect/NearbyThrottle.kt`).
+
+The test is stricter than §4.2's, because such a device carries no separated flag
+and almost every one heard is innocent. Only sightings at −85/−80/−75 dBm or
+stronger count at all; alerting needs 3/4/5 places over 60/120/180 minutes with
+4/5/6 counted sightings, places and counting as in §4.2. The alert is a separate,
+quieter notification that says a device *may* be moving with the user, and never
+calls it a tracker. Two limits are structural. A device that changes its address
+(phones and watches do, regularly; the Bluetooth Core specification suggests every
+15 minutes) appears as a new device after each change and cannot be followed. And a
+companion's or fellow passenger's device on a long enough shared journey satisfies
+the test exactly as a planted one does, so the user's own gear alerts until it is
+marked "It's mine". Day-long replays are in §7.
 
 ---
 
@@ -424,9 +465,8 @@ churn path at any rotation period, §7):
 
 The churn ceiling is the v1 rate gate: 0.7 seamless novel handovers per minute is
 one rotation every 85.7 s (the table's "~85 s"). The identity floor is the
-co-movement test of §4.2: three sightings, de-duplicated to one per 15 minutes,
-spanning the sensitivity's minimum time, so a single identity must survive that
-whole span. The original argument assumed an identity detector catches any key
+co-movement test of §4.2: three counted sightings spanning the sensitivity's
+minimum time, so a single identity must survive that whole span. The original argument assumed an identity detector catches any key
 held longer than ~3–5 min. Neither VIGIL nor AirGuard does: AirGuard's risk
 evaluator requires a device to have been tracked for 30, 60 or 120 minutes, by
 sensitivity, before it alarms [2]. An adversary who rotates every few minutes —
@@ -488,14 +528,33 @@ rather than claiming an impossible guarantee.
 VIGIL is a native Android/Kotlin app (min SDK 26), reusing the scanning and
 service architecture of OVERWATCH.
 
+**Keeping the scan honest.** Android 14 and later move a filtered scan that has run
+past a timeout (10 minutes by default and configurable per device; 5 on the Android
+14 emulator image) into low-power mode, listening about a tenth of the time, and
+never move it back. VIGIL therefore re-registers its tracker scan every 4 minutes,
+within Android's limit of five scan starts per 30 s; the loss demotion would cause
+on a real radio has not been measured, nor has the battery cost of avoiding it.
+While the system Location switch is off, Android delivers no scan results at all to
+an app whose scan permission is not declared never-for-location. On the Android 16
+emulator, a scan registered while Location was off stayed deaf after Location came
+back, until it was registered again. VIGIL shows Location off as "not watching"
+rather than all quiet, runs no sweeps then, and registers its scans afresh when
+Location returns.
+
 ```
 scan/TrackerSignatures.kt   BLE hex signatures for every ecosystem
 scan/TrackerParser.kt       ScanResult -> TrackerObservation (five wire formats)
 scan/BleTrackerScanner.kt   hardware-filtered scan (screen-off capable)
+scan/NearbyDeviceScanner.kt every other BLE device, in short periodic sweeps (§4.4)
+scan/NearbyDeviceParser.kt  ScanResult -> observation keyed on the address
+scan/LeScanClient.kt        shared scan start/stop/restart + Android's start quota
 service/ScanService.kt      foreground service; geotags, persists, alerts, vibrates
 data/db/VigilDatabase.kt    Room: trackers, sightings, baseline places, alerts
 data/TrackerRepository.kt   ingest + baseline + evaluate on each sighting
 detect/CoMovementEvaluator  the co-movement test + RSSI proximity gate
+detect/Places.kt            what counts as a different place (both tests)
+detect/NearbyDeviceEvaluator the stricter test for other devices (§4.4)
+detect/NearbyThrottle.kt    which devices a sweep records
 detect/BaselineManager.kt   anchor-place learning -> auto-trust static-ID tags
 detect/PresenceEngine.kt    the rotation-clone engine of §5 (v1, unit-tested)
 ring/TrackerRinger.kt       user-initiated GATT ring; RingReply.kt parses the reply
@@ -508,7 +567,8 @@ VIGIL never transmits it; it leaves the phone only if the user exports the
 evidence report or GPX. Cloud backup and device-to-device transfer are excluded.
 Retention is uneven. Sightings older than 14 days are deleted when watching starts
 and every 6 h while it runs, so they stay on the phone while VIGIL is stopped.
-Alerts keep their locations until the user clears Alert history. Learned places
+Sightings of other Bluetooth devices go after 48 h, unless the device raised an
+alert. Alerts keep their locations until the user clears Alert history. Learned places
 (geohash-6 cells with visit counts) have no in-app delete and stay until the app's
 storage is cleared; "Clear all trackers" removes trackers and sightings only.
 `BLUETOOTH_SCAN` is declared
@@ -516,7 +576,9 @@ storage is cleared; "Clear all trackers" removes trackers and sightings only.
 (and because that flag would filter out the very beacon-shaped advertisements
 VIGIL parses). On the detection path VIGIL only listens: it never
 advertises to or connects to a tracker (the phone's scan may send the generic scan
-requests any BLE scan does).
+requests any BLE scan does). To label the user's own devices in the list of other
+Bluetooth devices, VIGIL reads the phone's list of paired devices; it stores
+nothing from it.
 
 ---
 
@@ -566,6 +628,21 @@ then 30 s of silence) and with every beacon heard, it raises no alert on either
 path over a 3 h walk: each beacon starts a new presence run with no handover, and
 no key recurs for the identity path [7].
 
+**Day-long replays.** Two further suites replay whole simulated days, again with a
+perfect radio: `TrackerDayEvalTest` through the tracker path, `NearbyDeviceEvalTest`
+through the other-devices path. On the tracker path, a tag in a bag is flagged at
+08:30, 08:45 and 09:30 (high, medium, low) after the user leaves home at 08:00. A
+tag in a car on commutes of 4 to 30 minutes, departures varying by ±20 minutes, is
+flagged on the first drive home. A separated tag next door, heard all evening while
+the phone's position wanders by 25 or 100 m, never alerts (with v0.1.14's cell-based
+places it alerted on High in most homes at 25 m, and everywhere at 100 m; §4.2). On the other-devices path, something in a
+bag is flagged after about one, two or three hours; a device in the car on the
+drive home when the drives last 12 minutes or more at every setting (8 at medium,
+6 at high); a neighbour's television or a shop beacon passed daily never. The
+false alarms are the structural ones of §4.4: a stranger on the same train both
+ways is flagged at every setting, a stranger on one 70-minute ride and a colleague
+beside the user all day at high only.
+
 ---
 
 ## 8. Comparison to prior art
@@ -613,11 +690,16 @@ with situational-safety caveats.
 - **Wire-format offsets** are drawn from published reverse-engineering and, for
   SmartTag2 and 2024+ Tile, inferred from older captures; they require empirical
   validation before production trust.
-- **Coverage only while watching.** VIGIL scans continuously from a foreground
-  service once the user starts it, but nothing restarts it after a reboot or if
-  Android stops the app (§8).
+- **Coverage only while watching.** VIGIL listens from a foreground service once
+  the user starts it, re-registering its scan every 4 minutes (§6); on a sleeping
+  phone with nothing to wake the app, the restart waits for the next wake. Nothing
+  restarts the service after a reboot or if Android stops the app (§8).
 - **Needs location.** Without a current location fix VIGIL can't count places or
-  movement, so neither path can alert.
+  movement, so no path can alert. With the system Location switch off it hears
+  nothing at all, and says so (§6).
+- **Other devices (§4.4).** Followed only while they keep one address; Bluetooth LE
+  only; a companion's or fellow passenger's device gives the same pattern as a
+  planted one.
 - **Squeeze gap (§5.4).** Rotation periods from ~85 s up to the identity path's
   minimum span (30, 45 or 90 min by sensitivity) evade both detectors in v1.
 - **Duty cycling (§7).** Silences longer than 20 s reset the presence run, so a

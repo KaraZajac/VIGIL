@@ -252,7 +252,9 @@ code, pre { font-family: var(--mono); font-size: 0.93em; }
   border-color: var(--accent);
 }
 
-@media (max-width: 720px) {
+.nav-links a { white-space: nowrap; }
+/* Six section links need about 920 px on one line; below that only GitHub stays. */
+@media (max-width: 920px) {
   .nav-links a:not(.nav-github) { display: none; }
 }
 
@@ -630,6 +632,8 @@ code, pre { font-family: var(--mono); font-size: 0.93em; }
 }
 .annotation strong { color: var(--text); display: block; margin-bottom: 0.25rem; }
 .annotation p { margin: 0; color: var(--text-muted); font-size: 0.9rem; }
+/* Bold inside the text stays inline; only the annotation's title is a block. */
+.annotation p strong { display: inline; margin: 0; }
 @media (max-width: 700px) {
   .explain-annotations { grid-template-columns: 1fr; }
   .terminal-body { font-size: 0.78rem; padding: 1rem 1.1rem; }

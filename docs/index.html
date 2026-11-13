@@ -18,7 +18,7 @@
 <link rel="icon" type="image/svg+xml" href="logo.svg">
 
 
-<link rel="stylesheet" href="style.css?v=2">
+<link rel="stylesheet" href="style.css?v=3">
 </head>
 <body>
 
@@ -37,6 +37,7 @@
     <div class="nav-links">
       <a href="#detects">What it detects</a>
       <a href="#decides">How it decides</a>
+      <a href="#others">Other devices</a>
       <a href="#screens">Screens</a>
       <a href="#clones">Clones</a>
       <a href="#download">Download</a>
@@ -76,7 +77,7 @@
       <div class="stat-chip"><span class="num" data-target="5">0</span><span>tracker ecosystems</span></div>
       <div class="stat-chip stat-vfy"><span class="num" data-target="3">0</span><span>escalation tiers</span></div>
       <div class="stat-chip"><span class="num" data-target="0">0</span><span>internet permission</span></div>
-      <div class="stat-chip"><span class="num" data-target="2">0</span><span>detection paths</span></div>
+      <div class="stat-chip"><span class="num" data-target="3">0</span><span>detection paths</span></div>
     </div>
 
     <div class="cta-row">
@@ -175,17 +176,17 @@
       <article class="bento-card">
         <div class="bento-icon">📍</div>
         <h3>≥ N distinct places</h3>
-        <p>Geohash-7 cells; N = 2 / 3 / 4 by sensitivity. A tracker seen only where you dwell isn't following — it lives there.</p>
+        <p>Over 300 m apart, and further apart than the location fixes could be wrong by; N = 2 / 3 / 4 by sensitivity. A tracker seen only where you dwell isn't following — it lives there.</p>
       </article>
       <article class="bento-card">
         <div class="bento-icon">⏱</div>
         <h3>≥ 3 sightings over ≥ T minutes</h3>
-        <p>Debounced to one per 15 min; T = 30 / 45 / 90 by sensitivity. Persistence across time, not a single blip.</p>
+        <p>Counted once per 15 min, or sooner once you've moved on; T = 30 / 45 / 90 by sensitivity. Persistence across time, not a single blip.</p>
       </article>
       <article class="bento-card">
         <div class="bento-icon">📶</div>
         <h3>RSSI proximity gate</h3>
-        <p>Its peak signal must reach −85 dBm at least once at the default setting. AirGuard has no such check, though it's a coarse one: a tag can clear it from tens of metres away. What stops "a Tile in the next car at a few red lights" is the debounce — each tag counts once per 15 minutes, so it never adds up.</p>
+        <p>Its peak signal must reach −85 dBm at least once at the default setting. AirGuard has no such check, though it's a coarse one: a tag can clear it from tens of metres away. What stops "a Tile in the next car at a few red lights" is time: it has to stay with you for half an hour or more.</p>
       </article>
     </div>
 
@@ -196,7 +197,7 @@
       </div>
       <div class="tier tier-yellow">
         <div class="tier-name" style="font-size:1.15rem">SUSPICIOUS</div>
-        <p>Seen three or more times, 15 minutes apart, with a peak above the RSSI floor, but not yet across enough places or time. No notification yet; VIGIL keeps watching.</p>
+        <p>Seen three or more times, 15 minutes apart or at different places, with a peak above the RSSI floor, but not yet across enough places or time. No notification yet; VIGIL keeps watching.</p>
       </div>
       <div class="tier tier-red">
         <div class="tier-name" style="font-size:1.15rem">ALERTING</div>
@@ -221,6 +222,40 @@
           </div>
         </div>
       </div>
+    </div>
+  </div>
+</section>
+
+<!-- ──────────────── OTHER DEVICES ──────────────── -->
+<section id="others" class="section section-bento reveal">
+  <div class="container">
+    <div class="section-head">
+      <span class="section-tag">a second net</span>
+      <h2>Not every tracker looks like one.</h2>
+      <p class="lead">A tracker can be built on any Bluetooth chip, or belong to a
+      network VIGIL has no parser for. To a scanner it is then just another
+      device, like a pair of headphones. So VIGIL also lists
+      <strong>every other Bluetooth LE device it hears</strong> and runs a
+      stricter co-movement test on them, with its own quieter alert that says a
+      device <em>may</em> be moving with you.</p>
+    </div>
+
+    <div class="bento">
+      <article class="bento-card">
+        <div class="bento-icon">📡</div>
+        <h3>Close, every time</h3>
+        <p>Only sightings at −85 dBm or stronger count (−80 / −75 on Medium / Low), across 3 / 4 / 5 places over 1 / 2 / 3 hours. VIGIL listens for everything in a 12-second burst about every 2 minutes.</p>
+      </article>
+      <article class="bento-card">
+        <div class="bento-icon">🎧</div>
+        <h3>"It's mine"</h3>
+        <p>Your own headphones and watch will be flagged until you mark them, and a companion's look the same. Marked devices drop out of the alert.</p>
+      </article>
+      <article class="bento-card">
+        <div class="bento-icon">⚠</div>
+        <h3>What it can't do</h3>
+        <p>Follow a device that changes its Bluetooth address (phones and watches do, regularly), tell a planted device from one a fellow passenger carries, or hear Bluetooth Classic. Name and maker are whatever the device says.</p>
+      </article>
     </div>
   </div>
 </section>
@@ -253,7 +288,7 @@
         <figcaption><strong>Getting warmer</strong>Live signal strength as you approach. &ldquo;Make it ring&rdquo; asks it to play its sound and tells you what it answered. A silent or modified tag won't ring; the meter is how you find that one.</figcaption>
       </figure>
     </div>
-    <p class="tl-foot" style="text-align:center">The active list is from a real phone, with real trackers nearby. The locate and signal shots are VIGIL 0.1.14 on an Android emulator, with a simulated Google Find My Device tag. The screens are the real app; the tag isn't.</p>
+    <p class="tl-foot" style="text-align:center">All three are VIGIL 0.1.14. The active list is from a real phone, with real trackers nearby; 0.1.15 relabels it and adds the list of other Bluetooth devices below. The locate and signal shots are on an Android emulator, with a simulated Google Find My Device tag. The screens are the real app; the tag isn't.</p>
   </div>
 </section>
 
@@ -321,7 +356,9 @@
           database. VIGIL never transmits them and cloud backup is off; they
           <strong>leave the phone only if you export an evidence report
           yourself</strong>. Detection listens to what trackers already
-          broadcast and never connects to them.
+          broadcast and never connects to them. To label your own things,
+          VIGIL reads the list of devices paired with the phone and stores
+          nothing from it.
         </p>
       </article>
       <article class="bento-card">
@@ -356,7 +393,7 @@
       </div>
       <div class="tl-col tl-next">
         <div class="tl-tag">3 · grant + scan</div>
-        <ul><li>Grant nearby-devices + location + notifications and keep location on (without a fix VIGIL can't count places, so it can't alert). Pick a sensitivity and tap Start Watching; it keeps watching in the background until you stop it, the phone restarts, or Android closes the app.</li></ul>
+        <ul><li>Grant nearby-devices + location + notifications and keep Location on: with it off, Android gives VIGIL no Bluetooth results at all, and without a fix it can't count places. Pick a sensitivity and tap Start Watching; it keeps watching in the background until you stop it, the phone restarts, or Android closes the app.</li></ul>
       </div>
     </div>
     <p class="tl-foot">
@@ -395,6 +432,7 @@
         <li>Apple Find My / AirTag</li>
         <li>Google Find My · Tile</li>
         <li>Samsung SmartTag · DULT</li>
+        <li>Other Bluetooth devices</li>
       </ul>
     </div>
     <div class="footer-col">
