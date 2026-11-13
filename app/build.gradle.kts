@@ -81,6 +81,7 @@ dependencies {
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.lifecycle.service)
+    implementation(libs.androidx.lifecycle.runtime.compose)
     implementation(libs.androidx.activity.compose)
 
     implementation(platform(libs.androidx.compose.bom))
@@ -91,6 +92,13 @@ dependencies {
     implementation(libs.androidx.compose.material.icons.extended)
 
     implementation(libs.play.services.location)
+    constraints {
+        // VIGIL has no fragments, but play-services-location drags in Fragment 1.1.0,
+        // and Fragment before 1.3.0 breaks the Activity Result API for any
+        // FragmentActivity (lint: InvalidFragmentVersionForActivityResult). This
+        // only raises the version of what is already there; it adds no dependency.
+        implementation(libs.androidx.fragment)
+    }
 
     implementation(libs.androidx.room.runtime)
     implementation(libs.androidx.room.ktx)

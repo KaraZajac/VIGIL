@@ -8,7 +8,10 @@
          both forbids deriving location AND silently filters beacon-shaped
          advertisements from scan results (the exact payloads we parse). -->
     <uses-permission android:name="android.permission.BLUETOOTH_SCAN" />
-    <!-- Used only when the user taps "Make it ring", to GATT-connect to that one tag. -->
+    <!-- Two uses, both on the phone only: GATT-connecting to one tag when the
+         user taps "Make it ring", and reading the list of devices paired with
+         this phone so the list of other Bluetooth devices can label them
+         "paired with this phone". VIGIL never connects to anything else. -->
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
 
     <!-- BLE legacy (Android 11 and below) -->

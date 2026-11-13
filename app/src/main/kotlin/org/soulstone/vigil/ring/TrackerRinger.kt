@@ -9,6 +9,7 @@ import android.bluetooth.BluetoothGattCharacteristic
 import android.bluetooth.BluetoothGattDescriptor
 import android.bluetooth.BluetoothManager
 import android.bluetooth.BluetoothProfile
+import android.bluetooth.BluetoothStatusCodes
 import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Build
@@ -21,6 +22,7 @@ import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withTimeout
 import org.soulstone.vigil.model.TrackerEcosystem
 import java.util.UUID
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.coroutines.resume
 
 /**
@@ -78,6 +80,10 @@ object TrackerRinger {
                 return "Samsung SmartTags can only be rung from the SmartThings app (owner-only)."
             TrackerEcosystem.TILE ->
                 return "Tiles can only be rung from the Tile app (owner-only)."
+            // Ringing means connecting. VIGIL only ever does that to a known tracker
+            // type, at the user's request; anything else it just listens to.
+            TrackerEcosystem.OTHER_BLE ->
+                return "VIGIL can only ring known tracker types. It never connects to other Bluetooth devices."
             else -> {}
         }
         if (mac.isBlank()) return "No recent address for this tracker — keep watching and try again."
@@ -106,9 +112,17 @@ object TrackerRinger {
             var gatt: BluetoothGatt? = null
             var selected: Proto? = null
             val handler = Handler(Looper.getMainLooper())
+            // The Bluetooth callbacks arrive on a binder thread and the fallback on
+            // the main thread, so two endings can race. Only the first one counts:
+            // checking isActive and then resuming let both through, and the second
+            // resume throws.
+            val settled = AtomicBoolean(false)
+            fun settle(msg: String) {
+                if (settled.compareAndSet(false, true)) cont.resume(msg)
+            }
             fun finish(msg: String, g: BluetoothGatt) {
                 handler.removeCallbacksAndMessages(null)
-                if (cont.isActive) cont.resume(msg)
+                settle(msg)
                 g.disconnect()
             }
             val callback = object : BluetoothGattCallback() {
@@ -119,19 +133,23 @@ object TrackerRinger {
                             handler.removeCallbacksAndMessages(null)
                             // An AirTag hangs up (status 19) after playing its sound, so by
                             // now the sound may already be over. Say what was observed.
-                            if (cont.isActive) {
-                                cont.resume(
-                                    if (selected == AIRTAG && status == STATUS_PEER_DISCONNECT)
-                                        "The AirTag hung up, which it does after playing its sound. Didn't hear it? Move closer and try again."
-                                    else "The connection dropped before the tracker confirmed anything."
-                                )
-                            }
+                            settle(
+                                if (selected == AIRTAG && status == STATUS_PEER_DISCONNECT)
+                                    "The AirTag hung up, which it does after playing its sound. Didn't hear it? Move closer and try again."
+                                else "The connection dropped before the tracker confirmed anything."
+                            )
                             g.close()
                         }
                     }
                 }
 
                 override fun onServicesDiscovered(g: BluetoothGatt, status: Int) {
+                    // A failed discovery leaves the service list empty, which used to
+                    // be reported as "doesn't expose a remote-ring service": a claim
+                    // about the tracker that nothing had established.
+                    if (status != BluetoothGatt.GATT_SUCCESS) {
+                        return finish("Couldn't read the tracker's services (status $status). Move closer and try again.", g)
+                    }
                     val proto = PRIORITY.firstOrNull { g.getService(it.service) != null }
                         ?: return finish("This tracker type doesn't expose a remote-ring service.", g)
                     val ch = g.getService(proto.service)?.getCharacteristic(proto.characteristic)
@@ -142,7 +160,12 @@ object TrackerRinger {
                         val desc = ch.getDescriptor(CCCD)
                         val v = if (proto.indicate) BluetoothGattDescriptor.ENABLE_INDICATION_VALUE
                         else BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
-                        if (desc == null || !writeDescriptor(g, desc, v)) writeStart(g, ch, proto)
+                        // No way to ask for the confirmation: send the command anyway.
+                        // If even that can't be queued, say so now instead of leaving
+                        // the timeout to blame range.
+                        if (desc == null || !writeDescriptor(g, desc, v)) {
+                            if (!writeStart(g, ch, proto)) finish("Couldn't send the ring command.", g)
+                        }
                     } else {
                         if (!writeStart(g, ch, proto)) finish("Couldn't send the ring command.", g)
                     }
@@ -150,6 +173,9 @@ object TrackerRinger {
 
                 override fun onDescriptorWrite(g: BluetoothGatt, desc: BluetoothGattDescriptor, status: Int) {
                     val proto = selected ?: return
+                    // If the tracker refused to enable its confirmation, the command is
+                    // still worth sending; the outcome then reads "sent, not confirmed".
+                    if (status != BluetoothGatt.GATT_SUCCESS) Log.w(TAG, "confirmation not enabled (status $status)")
                     val ch = g.getService(proto.service)?.getCharacteristic(proto.characteristic)
                         ?: return finish("Ring characteristic missing on this tracker.", g)
                     if (!writeStart(g, ch, proto)) finish("Couldn't send the ring command.", g)
@@ -158,7 +184,7 @@ object TrackerRinger {
                 override fun onCharacteristicWrite(g: BluetoothGatt, ch: BluetoothGattCharacteristic, status: Int) {
                     // An indication can beat the write callback; if the reply already
                     // settled the outcome, don't arm a fallback that would fire later.
-                    if (!cont.isActive) return
+                    if (settled.get()) return
                     // Status FIRST. The AirTag branch used to return ahead of this check,
                     // so a write the tracker rejected still reported "Ringing".
                     // A failed write may be the tag rejecting it or a local stack error
@@ -209,7 +235,7 @@ object TrackerRinger {
     private fun writeStart(g: BluetoothGatt, ch: BluetoothGattCharacteristic, proto: Proto): Boolean =
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             g.writeCharacteristic(ch, proto.start, BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT) ==
-                BluetoothGatt.GATT_SUCCESS
+                BluetoothStatusCodes.SUCCESS
         } else {
             ch.writeType = BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
             ch.value = proto.start
@@ -220,7 +246,7 @@ object TrackerRinger {
     @SuppressLint("MissingPermission")
     private fun writeDescriptor(g: BluetoothGatt, desc: BluetoothGattDescriptor, value: ByteArray): Boolean =
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            g.writeDescriptor(desc, value) == BluetoothGatt.GATT_SUCCESS
+            g.writeDescriptor(desc, value) == BluetoothStatusCodes.SUCCESS
         } else {
             desc.value = value
             g.writeDescriptor(desc)

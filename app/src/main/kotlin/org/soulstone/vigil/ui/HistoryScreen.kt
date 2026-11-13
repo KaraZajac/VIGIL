@@ -26,10 +26,13 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.produceState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.delay
 import org.soulstone.vigil.data.db.AlertEntity
 import org.soulstone.vigil.data.signalWord
 import org.soulstone.vigil.model.TrackerEcosystem
@@ -43,6 +46,14 @@ fun HistoryScreen(
     onBack: () -> Unit
 ) {
     BackHandler(onBack = onBack)
+    // Ticks so "5 minutes ago" keeps counting while the screen stays open; it used
+    // to show whatever was true when each row was first drawn.
+    val now by produceState(System.currentTimeMillis()) {
+        while (true) {
+            delay(30_000L)
+            value = System.currentTimeMillis()
+        }
+    }
     Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
         Column(Modifier.fillMaxSize().padding(16.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -61,19 +72,19 @@ fun HistoryScreen(
             }
             Spacer(Modifier.height(6.dp))
             Text(
-                "Export builds a timestamped report and a GPX file of the alerted trackers (open it in a maps app), then opens the share sheet. Nothing leaves the phone unless you send it.",
+                "Export builds a timestamped report and a GPX file of the trackers and devices that were flagged (open it in a maps app), then opens the share sheet. Nothing leaves the phone unless you send it.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
             Spacer(Modifier.height(16.dp))
             if (alerts.isEmpty()) {
                 Text(
-                    "No alerts yet. When VIGIL alerts on a tracker moving with you, it's logged here.",
+                    "No alerts yet. When VIGIL flags a tracker or another Bluetooth device moving with you, it's logged here.",
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             } else {
                 LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    items(alerts, key = { it.id }) { a -> AlertRow(a) }
+                    items(alerts, key = { it.id }) { a -> AlertRow(a, now) }
                 }
             }
         }
@@ -81,12 +92,25 @@ fun HistoryScreen(
 }
 
 @Composable
-private fun AlertRow(a: AlertEntity) {
+private fun AlertRow(a: AlertEntity, now: Long) {
+    // Not a known tracker type: show what it called itself, and say what it is not,
+    // so this row can't be read as "a tracker was found".
+    val generic = a.ecosystem == TrackerEcosystem.OTHER_BLE.name
     Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
         Column(Modifier.padding(14.dp)) {
-            Text(ecoName(a.ecosystem), fontWeight = FontWeight.SemiBold)
             Text(
-                "${a.distinctPlaces} places · ${signalWord(a)} ${a.peakRssi} dBm · ${rel(a.timestamp)}",
+                if (generic) a.label.ifEmpty { ecoName(a.ecosystem) } else ecoName(a.ecosystem),
+                fontWeight = FontWeight.SemiBold
+            )
+            if (generic) {
+                Text(
+                    "Bluetooth device · not a known tracker type · …${a.trackerId.takeLast(5)}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            Text(
+                "${a.distinctPlaces} places · ${signalWord(a)} ${a.peakRssi} dBm · ${rel(a.timestamp, now)}",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -95,4 +119,5 @@ private fun AlertRow(a: AlertEntity) {
 }
 
 private fun ecoName(name: String) = runCatching { TrackerEcosystem.valueOf(name).display }.getOrDefault(name)
-private fun rel(ts: Long) = DateUtils.getRelativeTimeSpanString(ts, System.currentTimeMillis(), DateUtils.MINUTE_IN_MILLIS).toString()
+private fun rel(ts: Long, now: Long) =
+    DateUtils.getRelativeTimeSpanString(ts, maxOf(now, ts), DateUtils.MINUTE_IN_MILLIS).toString()

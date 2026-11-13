@@ -1,5 +1,6 @@
 package org.soulstone.vigil.data
 
+import androidx.room.withTransaction
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -9,12 +10,14 @@ import org.soulstone.vigil.data.db.TrackerEntity
 import org.soulstone.vigil.data.db.VigilDatabase
 import org.soulstone.vigil.detect.BaselineManager
 import org.soulstone.vigil.detect.CoMovementEvaluator
+import org.soulstone.vigil.detect.NearbyDeviceEvaluator
 import org.soulstone.vigil.model.RiskState
 import org.soulstone.vigil.model.SeparatedState
 import org.soulstone.vigil.model.Sensitivity
 import org.soulstone.vigil.model.TrackerEcosystem
 import org.soulstone.vigil.model.TrackerObservation
 import org.soulstone.vigil.model.TrailPoint
+import org.soulstone.vigil.scan.NearbyDeviceParser
 import org.soulstone.vigil.util.Geohash
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -43,11 +46,20 @@ class TrackerRepository(
 
     // Serialises record() so the read-modify-write of a tracker row is atomic —
     // concurrent observations were racing and losing count / first-seen updates.
-    private val mutex = Mutex()
+    // One lock for the whole process, not one per instance: the activity and the
+    // service each build their own repository over the same database, and with a
+    // lock each, a sighting being written could put back the old value of a row
+    // the user had just marked "It's mine" or "Not mine".
+    private val mutex get() = sharedMutex
 
     data class RecordResult(val tracker: TrackerEntity, val newlyAlerting: Boolean)
 
     fun observeTrackers(): Flow<List<TrackerEntity>> = db.trackerDao().observeAll()
+
+    /** The main screen's list: all trackers, and the other Bluetooth devices that
+     *  are marked, flagged, or were heard since [since]. */
+    fun observeTrackersForUi(since: Long): Flow<List<TrackerEntity>> =
+        db.trackerDao().observeForUi(since)
 
     // Under the same lock as record() so a concurrent observation can't clobber the
     // user's choice back to its stale value.
@@ -64,6 +76,9 @@ class TrackerRepository(
         val cutoff = System.currentTimeMillis() - retentionDays * BaselineManager.DAY_MS
         db.sightingDao().prune(cutoff)
         db.trackerDao().pruneStale(cutoff)
+        val genericCutoff = System.currentTimeMillis() - GENERIC_RETENTION_MS
+        db.sightingDao().pruneGeneric(genericCutoff)
+        db.trackerDao().pruneStaleGeneric(genericCutoff)
     }
 
     /** Wipe the whole tracker list + sighting history (they re-populate as devices
@@ -81,8 +96,74 @@ class TrackerRepository(
         obs: TrackerObservation,
         lat: Double?,
         lon: Double?,
-        sensitivity: Sensitivity
-    ): RecordResult = mutex.withLock {
+        sensitivity: Sensitivity,
+        accuracyM: Float? = null
+    ): RecordResult = mutex.withLock { recordLocked(obs, lat, lon, sensitivity, accuracyM) }
+
+    /**
+     * Ingest everything one all-devices sweep heard, as a single transaction so the
+     * screen re-reads the list once per sweep instead of once per device.
+     */
+    suspend fun recordAll(
+        observations: List<TrackerObservation>,
+        lat: Double?,
+        lon: Double?,
+        sensitivity: Sensitivity,
+        accuracyM: Float? = null,
+        /** Heard in the same sweep but not due a sighting: only "last heard" moves. */
+        alsoHeard: List<TrackerObservation> = emptyList()
+    ): List<RecordResult> = mutex.withLock {
+        if (observations.isEmpty() && alsoHeard.isEmpty()) emptyList()
+        else db.withTransaction {
+            val results = observations.map { recordLocked(it, lat, lon, sensitivity, accuracyM) }
+            if (alsoHeard.isNotEmpty()) {
+                val flagged = db.trackerDao().flaggedGenericIds().toHashSet()
+                for (o in alsoHeard) {
+                    db.trackerDao().touch(o.stableId, o.timestampMs, o.rssi)
+                    if (o.stableId in flagged) settleLocked(o.stableId, o.timestampMs, sensitivity)
+                }
+            }
+            results
+        }
+    }
+
+    /**
+     * A flagged device was heard again without a sighting being written (too weak
+     * to count, or nothing new to say about it). Left alone, its stored state would
+     * stand for as long as it stayed in earshot, on evidence that has since aged
+     * out of the window: a neighbour's speaker that once came along on a walk would
+     * read "moving with you" for good. So judge its stored sightings again and let
+     * the state fall if they no longer support it.
+     *
+     * It never rises here. A rise has to come from a recorded sighting, because
+     * that is what raises the alert and writes the history.
+     */
+    private suspend fun settleLocked(id: String, now: Long, sensitivity: Sensitivity) {
+        val row = db.trackerDao().get(id) ?: return
+        val stored = RiskState.entries.firstOrNull { it.name == row.riskState } ?: return
+        val recent = db.sightingDao().recentFor(id, now - CoMovementEvaluator.WINDOW_MS)
+        val assessment =
+            NearbyDeviceEvaluator.evaluate(recent, NearbyDeviceEvaluator.thresholdsFor(sensitivity))
+        val supported =
+            if (row.approved || row.baselineSafe) RiskState.OBSERVED else assessment.riskState
+        val settled = NearbyDeviceEvaluator.settled(stored, supported)
+        if (settled == stored) return
+        db.trackerDao().upsert(
+            row.copy(
+                riskState = settled.name,
+                distinctPlaces = assessment.distinctPlaces,
+                effectiveSightings = assessment.sightings
+            )
+        )
+    }
+
+    private suspend fun recordLocked(
+        obs: TrackerObservation,
+        lat: Double?,
+        lon: Double?,
+        sensitivity: Sensitivity,
+        accuracyM: Float?
+    ): RecordResult {
         val now = obs.timestampMs
         val geohash7 = if (lat != null && lon != null) Geohash.encode(lat, lon, 7) else null
         val geohash6 = if (lat != null && lon != null) Geohash.encode(lat, lon, 6) else null
@@ -93,7 +174,8 @@ class TrackerRepository(
                 timestamp = now,
                 rssi = obs.rssi,
                 separated = obs.separated == SeparatedState.SEPARATED,
-                lat = lat, lon = lon, geohash7 = geohash7
+                lat = lat, lon = lon, geohash7 = geohash7,
+                accuracy = accuracyM.takeIf { lat != null && lon != null }
             )
         )
 
@@ -106,8 +188,12 @@ class TrackerRepository(
         // tag is safe to baseline. Always computed (UI shows the evidence numbers).
         val since = now - CoMovementEvaluator.WINDOW_MS
         val recent = db.sightingDao().recentFor(obs.stableId, since)
-        val t = CoMovementEvaluator.thresholdsFor(sensitivity)
-        val assessment = CoMovementEvaluator.evaluate(recent, obs.ecosystem, t)
+        val generic = obs.ecosystem.isGeneric
+        val assessment = if (generic) {
+            NearbyDeviceEvaluator.evaluate(recent, NearbyDeviceEvaluator.thresholdsFor(sensitivity))
+        } else {
+            CoMovementEvaluator.evaluate(recent, obs.ecosystem, CoMovementEvaluator.thresholdsFor(sensitivity))
+        }
         val coMoving = assessment.riskState != RiskState.OBSERVED
 
         // --- baseline: learn tags that live where you live -------------------
@@ -140,10 +226,21 @@ class TrackerRepository(
         val cooldownOk = now - (existing?.lastAlertMs ?: 0) > CoMovementEvaluator.ALERT_COOLDOWN_MS
         val newlyAlerting = riskState == RiskState.ALERTING && !wasAlerting && cooldownOk
 
+        // A device's name and its maker id often arrive in different adverts, so
+        // keep the best description heard so far rather than the latest one.
+        val name = obs.name.ifEmpty { existing?.name ?: "" }
+        val vendor = obs.vendor.ifEmpty { existing?.vendor ?: "" }
+        val label = when {
+            !generic -> obs.label
+            name.isNotEmpty() -> name
+            obs.label != NearbyDeviceParser.UNNAMED -> obs.label
+            else -> existing?.label?.takeIf { it.isNotEmpty() } ?: obs.label
+        }
+
         val updated = TrackerEntity(
             stableId = obs.stableId,
             ecosystem = obs.ecosystem.name,
-            label = obs.label,
+            label = label,
             firstSeen = existing?.firstSeen ?: now,
             lastSeen = now,
             sightingCount = (existing?.sightingCount ?: 0) + 1,
@@ -157,7 +254,10 @@ class TrackerRepository(
             peakRssi = maxOf(existing?.peakRssi ?: -127, obs.rssi),
             distinctPlaces = assessment.distinctPlaces,
             effectiveSightings = assessment.sightings,
-            lastMac = obs.mac
+            lastMac = obs.mac,
+            name = name,
+            vendor = vendor,
+            addrKind = if (obs.addressKind.code != 0) obs.addressKind.code else (existing?.addrKind ?: 0)
         )
         db.trackerDao().upsert(updated)
         if (newlyAlerting) {
@@ -165,7 +265,7 @@ class TrackerRepository(
                 AlertEntity(
                     trackerId = obs.stableId,
                     ecosystem = obs.ecosystem.name,
-                    label = obs.label,
+                    label = label,
                     timestamp = now,
                     distinctPlaces = assessment.distinctPlaces,
                     peakRssi = updated.peakRssi,
@@ -173,7 +273,7 @@ class TrackerRepository(
                 )
             )
         }
-        RecordResult(updated, newlyAlerting)
+        return RecordResult(updated, newlyAlerting)
     }
 
     /**
@@ -215,6 +315,10 @@ class TrackerRepository(
 
     fun observeAlerts(): Flow<List<AlertEntity>> = db.alertDao().observeAll()
 
+    /** Other Bluetooth devices that are flagged right now and were heard since [since]. */
+    suspend fun alertingNearby(since: Long): List<TrackerEntity> =
+        db.trackerDao().alertingGeneric(since)
+
     suspend fun clearAlerts() = db.alertDao().clear()
 
     /** Geotagged sightings of one tracker, in time order, for the in-app trail. */
@@ -239,6 +343,11 @@ class TrackerRepository(
             sb.appendLine()
             sb.appendLine("${ecoLabel(head.ecosystem)} — ${head.label}")
             sb.appendLine("Identity: $trackerId")
+            if (head.ecosystem == TrackerEcosystem.OTHER_BLE.name) {
+                sb.appendLine("Not identified as a tracker: a Bluetooth device that stayed close to this phone across")
+                sb.appendLine("several places. Its name is whatever the device advertised, which anyone can set.")
+                sb.appendLine("A device carried by someone travelling with this phone's owner is recorded the same way.")
+            }
             sb.appendLine("Flagged ${group.size} time(s):")
             for (a in group) {
                 val where = if (a.lat != null && a.lon != null) "%.5f, %.5f".format(a.lat, a.lon) else "no location"
@@ -254,7 +363,7 @@ class TrackerRepository(
         }
         sb.appendLine()
         sb.appendLine("=".repeat(52))
-        sb.appendLine("Recorded by VIGIL, an offline anti-tracking app — a log of Bluetooth trackers detected moving with this phone.")
+        sb.appendLine("Recorded by VIGIL, an offline anti-tracking app — a log of Bluetooth trackers and other Bluetooth devices detected moving with this phone.")
         return sb.toString()
     }
 
@@ -295,8 +404,15 @@ class TrackerRepository(
     companion object {
         const val RETENTION_DAYS = 14
 
+        /** How long a catch-all Bluetooth device and its sightings are kept unless
+         *  the user marked it or it has an alert in the history. Twice the
+         *  co-movement window. */
+        const val GENERIC_RETENTION_MS = 2 * CoMovementEvaluator.WINDOW_MS
+
         /** Synthetic tracker id for presence-engine (rotating clone) detections. */
         const val CLONE_TRACKER_ID = "clone:rotating"
+
+        private val sharedMutex = Mutex()
     }
 }
 
@@ -315,5 +431,6 @@ private fun trackerShortName(stableId: String): String = when (stableId.substrin
     "tile" -> "Tile"
     "dult" -> "DULT"
     "clone" -> "RotatingClone"
+    "ble" -> "BluetoothDevice"
     else -> "Tracker"
 }

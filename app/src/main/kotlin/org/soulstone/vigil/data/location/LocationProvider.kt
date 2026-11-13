@@ -7,6 +7,7 @@ import android.content.pm.PackageManager
 import android.location.Location
 import android.location.LocationManager
 import android.os.Looper
+import android.os.SystemClock
 import android.util.Log
 import androidx.core.content.ContextCompat
 import androidx.core.location.LocationManagerCompat
@@ -26,12 +27,22 @@ import kotlinx.coroutines.flow.asStateFlow
  * Ported from OVERWATCH. BALANCED power (~100 m) is plenty for geohash-7 place
  * bucketing and keeps the always-on scan easy on the battery.
  */
-class LocationProvider(private val context: Context) {
+class LocationProvider(
+    private val context: Context,
+    /**
+     * Called on the main thread for every fix delivered. A fix is one of the few
+     * things that reliably wakes a sleeping phone for this app, so the service
+     * hangs its periodic work on it (see ScanService.tick).
+     */
+    private val onFix: () -> Unit = {}
+) {
 
     companion object {
         private const val TAG = "LocationProvider"
         private const val INTERVAL_MS = 15_000L
         private const val MIN_INTERVAL_MS = 5_000L
+        // The cached last fix is only a usable starting point if it is recent.
+        private const val MAX_SEED_AGE_MS = 2 * 60_000L
     }
 
     private val client: FusedLocationProviderClient by lazy {
@@ -64,6 +75,7 @@ class LocationProvider(private val context: Context) {
             if (!running) return
             _location.value = result.lastLocation ?: return
             _available.value = true
+            onFix()
         }
 
         override fun onLocationAvailability(availability: LocationAvailability) {
@@ -91,7 +103,12 @@ class LocationProvider(private val context: Context) {
             _available.value = systemLocationOn()
             client.requestLocationUpdates(request, callback, Looper.getMainLooper())
             client.lastLocation.addOnSuccessListener { last ->
-                if (running && last != null && _location.value == null) _location.value = last
+                // The cache holds wherever ANY app last had a fix, however long ago.
+                // Seeding from it unchecked pinned the first sightings of a session
+                // to a place the phone may have left hours earlier.
+                if (running && last != null && _location.value == null && isFresh(last)) {
+                    _location.value = last
+                }
             }
             true
         } catch (e: SecurityException) {
@@ -110,8 +127,17 @@ class LocationProvider(private val context: Context) {
         _available.value = true
     }
 
-    private fun systemLocationOn(): Boolean {
+    private fun isFresh(l: Location): Boolean {
+        val ageMs = (SystemClock.elapsedRealtimeNanos() - l.elapsedRealtimeNanos) / 1_000_000
+        return ageMs in 0..MAX_SEED_AGE_MS
+    }
+
+    /**
+     * The system Location switch. Matters beyond fixes: while it is off Android
+     * gives this app no Bluetooth scan results either (see ScanService).
+     */
+    fun systemLocationOn(): Boolean {
         val lm = context.getSystemService(Context.LOCATION_SERVICE) as? LocationManager ?: return true
-        return LocationManagerCompat.isLocationEnabled(lm)
+        return runCatching { LocationManagerCompat.isLocationEnabled(lm) }.getOrDefault(true)
     }
 }

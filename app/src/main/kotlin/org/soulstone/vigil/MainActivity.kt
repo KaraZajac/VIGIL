@@ -1,6 +1,8 @@
 package org.soulstone.vigil
 
 import android.Manifest
+import android.annotation.SuppressLint
+import android.bluetooth.BluetoothManager
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
@@ -14,11 +16,13 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
 import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.io.File
 import org.soulstone.vigil.data.TrackerRepository
@@ -39,6 +43,7 @@ class MainActivity : ComponentActivity() {
     private lateinit var repo: TrackerRepository
     private val permissionsGranted = mutableStateOf(false)
     private val notificationsGranted = mutableStateOf(true)
+    private val pairedAddresses = mutableStateOf<Set<String>>(emptySet())
 
     private val requiredPermissions: Array<String>
         get() = buildList {
@@ -66,6 +71,7 @@ class MainActivity : ComponentActivity() {
         val granted = hasEssentialPermissions()
         permissionsGranted.value = granted
         notificationsGranted.value = hasNotificationPermission()
+        pairedAddresses.value = readPairedAddresses()
         if (granted) ScanService.start(this)
     }
 
@@ -101,12 +107,26 @@ class MainActivity : ComponentActivity() {
                         val running by ScanService.running.collectAsState()
                         val scanFault by ScanService.scanFault.collectAsState()
                         val locationFault by ScanService.locationFault.collectAsState()
-                        val trackers by repo.observeTrackers().collectAsState(initial = emptyList())
+                        // Other Bluetooth devices that were only ever heard in passing
+                        // are left out once they are a while gone; the cutoff is moved
+                        // forward once a minute rather than on every recomposition.
+                        val since by produceState(System.currentTimeMillis() - LIST_WINDOW_MS) {
+                            while (true) {
+                                delay(60_000L)
+                                value = System.currentTimeMillis() - LIST_WINDOW_MS
+                            }
+                        }
+                        val trackers by remember(since) { repo.observeTrackersForUi(since) }
+                            .collectAsState(initial = emptyList())
                         // Newest first. The hero needs it because a rotating-clone alert
                         // has no tracker row, and an alerted tag drops off the Active list
                         // after 10 min — either way the card would otherwise go green.
                         val alerts by repo.observeAlerts().collectAsState(initial = emptyList())
                         val sensitivity by settings.sensitivity.collectAsState()
+                        val nearbyEnabled by settings.nearbyDevices.collectAsState()
+                        val lastSweepAt by ScanService.lastSweepAt.collectAsState()
+                        val sweepFault by ScanService.sweepFault.collectAsState()
+                        val paired by pairedAddresses
                         val granted by permissionsGranted
                         val notifyGranted by notificationsGranted
 
@@ -128,7 +148,15 @@ class MainActivity : ComponentActivity() {
                             },
                             scanFault = scanFault,
                             locationFault = locationFault,
-                            latestAlert = alerts.firstOrNull(),
+                            alerts = alerts,
+                            nearbyEnabled = nearbyEnabled,
+                            lastSweepAt = lastSweepAt,
+                            sweepFault = sweepFault,
+                            pairedAddresses = paired,
+                            onSetNearby = { on ->
+                                settings.setNearbyDevices(on)
+                                if (on) ScanService.requestSweep()
+                            },
                             onStartStop = {
                                 if (running) {
                                     ScanService.stop(this)
@@ -140,13 +168,21 @@ class MainActivity : ComponentActivity() {
                             },
                             onSetSensitivity = { settings.setSensitivity(it) },
                             onApprove = { id, approved ->
-                                lifecycleScope.launch { repo.setApproved(id, approved) }
+                                lifecycleScope.launch {
+                                    repo.setApproved(id, approved)
+                                    ScanService.noteApprovalChanged(this@MainActivity, id, approved)
+                                }
                             },
                             onDistrust = { id ->
                                 lifecycleScope.launch { repo.clearBaseline(id) }
                             },
                             onRing = { tracker -> ringTracker(tracker) },
-                            onClearAll = { lifecycleScope.launch { repo.clearAll() } },
+                            onClearAll = {
+                                lifecycleScope.launch {
+                                    repo.clearAll()
+                                    ScanService.noteDevicesCleared(this@MainActivity)
+                                }
+                            },
                             onOpenSafety = { showSafety = true },
                             onOpenHistory = { showHistory = true },
                             loadTrail = { id -> repo.trailFor(id) }
@@ -161,7 +197,22 @@ class MainActivity : ComponentActivity() {
         super.onResume()
         permissionsGranted.value = hasEssentialPermissions()
         notificationsGranted.value = hasNotificationPermission()
+        pairedAddresses.value = readPairedAddresses()
+        // The list of other devices is only as fresh as the last sweep; don't make
+        // someone who just opened the app wait up to two minutes for one.
+        ScanService.requestSweep()
     }
+
+    /**
+     * Addresses of devices paired with this phone, to label them in the list of
+     * other Bluetooth devices. A label only: an address can be copied, so a paired
+     * address is never treated as trusted on its own.
+     */
+    @SuppressLint("MissingPermission")
+    private fun readPairedAddresses(): Set<String> = runCatching {
+        getSystemService(BluetoothManager::class.java)?.adapter
+            ?.bondedDevices?.mapTo(HashSet()) { it.address }
+    }.getOrNull() ?: emptySet()
 
     private fun hasEssentialPermissions(): Boolean = requiredPermissions
         .filter { it != Manifest.permission.POST_NOTIFICATIONS }
@@ -208,6 +259,12 @@ class MainActivity : ComponentActivity() {
                 Toast.makeText(this@MainActivity, "Export failed: ${it.message}", Toast.LENGTH_LONG).show()
             }
         }
+    }
+
+    private companion object {
+        // How long an other-device row that was only heard in passing stays loaded.
+        // Longer than the list's own 10-minute cut so nothing vanishes early.
+        const val LIST_WINDOW_MS = 15 * 60_000L
     }
 
     private fun openAppSettings() {

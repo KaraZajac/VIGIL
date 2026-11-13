@@ -14,7 +14,41 @@ enum class TrackerEcosystem(val display: String) {
      * exists so a clone detection can be stored and displayed like any other alert.
      */
     ROTATING_CLONE("Rotating-ID tracker"),
-    UNKNOWN("Unknown tracker")
+    /**
+     * Any other Bluetooth LE device heard nearby that is not one of the tracker wire
+     * formats above: headphones, watches, car kits, beacons, and trackers VIGIL has
+     * no parser for. Keyed on the advertising address, so it can only be followed
+     * while that address stays the same (see [AddressKind]). Judged by
+     * [org.soulstone.vigil.detect.NearbyDeviceEvaluator], never by the tracker rules.
+     */
+    OTHER_BLE("Bluetooth device"),
+    UNKNOWN("Unknown tracker");
+
+    /** True for the catch-all "any Bluetooth device" class, not a parsed tracker. */
+    val isGeneric: Boolean get() = this == OTHER_BLE
+
+    companion object {
+        /** Stable-id prefix of [OTHER_BLE] rows; SQL filters rely on it. */
+        const val GENERIC_ID_PREFIX = "ble:"
+    }
+}
+
+/**
+ * What kind of advertising address a device used, when Android tells us (API 35+).
+ * It decides whether the device can be followed at all: only [PUBLIC] and [STATIC]
+ * addresses stay put. A [RESOLVABLE] address is re-rolled regularly by design (the
+ * Bluetooth Core specification suggests every 15 minutes; phones and watches do it,
+ * and so do some accessories), so each roll looks like a new device.
+ */
+enum class AddressKind(val code: Int) {
+    UNKNOWN(0), PUBLIC(1), STATIC(2), RESOLVABLE(3), NON_RESOLVABLE(4);
+
+    /** True when the address is known to change on its own. */
+    val rotates: Boolean get() = this == RESOLVABLE || this == NON_RESOLVABLE
+
+    companion object {
+        fun fromCode(code: Int): AddressKind = entries.firstOrNull { it.code == code } ?: UNKNOWN
+    }
 }
 
 /**
@@ -33,7 +67,12 @@ data class TrackerObservation(
     val rssi: Int,
     val separated: SeparatedState,
     val label: String,
-    val timestampMs: Long = System.currentTimeMillis()
+    val timestampMs: Long = System.currentTimeMillis(),
+    /** Advertised device name, cleaned; "" when none. Only set for [TrackerEcosystem.OTHER_BLE]. */
+    val name: String = "",
+    /** Maker from the Bluetooth SIG company id in the advert; "" when unknown. */
+    val vendor: String = "",
+    val addressKind: AddressKind = AddressKind.UNKNOWN
 )
 
 /** Risk lifecycle for a tracked device (hysteretic; see CoMovementEvaluator). */

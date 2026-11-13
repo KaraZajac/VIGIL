@@ -27,6 +27,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -58,24 +60,31 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import org.soulstone.vigil.BuildConfig
@@ -84,6 +93,7 @@ import org.soulstone.vigil.data.TrackerRepository
 import org.soulstone.vigil.data.db.AlertEntity
 import org.soulstone.vigil.data.db.TrackerEntity
 import org.soulstone.vigil.detect.CoMovementEvaluator
+import org.soulstone.vigil.model.AddressKind
 import org.soulstone.vigil.model.Sensitivity
 import org.soulstone.vigil.model.TrackerEcosystem
 import org.soulstone.vigil.R
@@ -103,7 +113,16 @@ fun MainScreen(
     onPermissionClick: () -> Unit,
     scanFault: String?,
     locationFault: String?,
-    latestAlert: AlertEntity?,
+    /** Newest first. */
+    alerts: List<AlertEntity>,
+    /** Whether the all-devices sweep is switched on. */
+    nearbyEnabled: Boolean,
+    /** Wall-clock time of the last finished sweep; 0 if none yet this session. */
+    lastSweepAt: Long,
+    sweepFault: String?,
+    /** Addresses of devices paired with this phone. Shown as a hint, never trusted. */
+    pairedAddresses: Set<String>,
+    onSetNearby: (Boolean) -> Unit,
     onStartStop: () -> Unit,
     onSetSensitivity: (Sensitivity) -> Unit,
     onApprove: (String, Boolean) -> Unit,
@@ -116,6 +135,7 @@ fun MainScreen(
 ) {
     var detail by remember { mutableStateOf<TrackerEntity?>(null) }
     var finding by remember { mutableStateOf<TrackerEntity?>(null) }
+    var showAllNearby by remember { mutableStateOf(false) }
 
     // Ticks so the Active window keeps advancing. A single composition-time value
     // meant the list only re-filtered when a new sighting arrived, so with scanning
@@ -126,13 +146,33 @@ fun MainScreen(
             delay(30_000)
         }
     }
-    val active = trackers
+    // Known tracker types and "any other Bluetooth device" are kept apart all the
+    // way down: different evidence, different certainty, different wording.
+    val (others, known) = trackers.partition { isGeneric(it) }
+    val active = known
         .filter { !isTrusted(it) && now - it.lastSeen < ACTIVE_WINDOW_MS }
         .sortedByDescending { riskRank(it) }
-    val trusted = trackers.filter { isTrusted(it) }
+    // Devices learned at the user's usual places stay in this list (dimmed) rather
+    // than in "Trusted": a home can have dozens, and nobody chose them.
+    val nearby = others
+        .filter { !it.approved && now - it.lastSeen < ACTIVE_WINDOW_MS }
+        .sortedWith(
+            compareByDescending<TrackerEntity> { riskRank(it) }
+                .thenBy { AddressKind.fromCode(it.addrKind).rotates }
+                .thenByDescending { it.lastRssi }
+        )
+    val trusted = known.filter { isTrusted(it) } + others.filter { it.approved }
     val alerting = active.count { statusOf(it) == TrackerStatus.ALERTING }
     val suspicious = active.count { statusOf(it) == TrackerStatus.SUSPICIOUS }
-    val recentAlert = latestAlert?.takeIf { now - it.timestamp < RECENT_ALERT_MS }
+    val nearbyAlerting = nearby.count { statusOf(it) == TrackerStatus.ALERTING }
+    // An alert the user has since answered with "It's mine" is no longer news. It
+    // used to keep the card red for four hours after they had said so.
+    val openAlerts = alerts.asSequence()
+        .takeWhile { now - it.timestamp < RECENT_ALERT_MS }
+        .filter { a -> trackers.none { it.stableId == a.trackerId && isTrusted(it) } }
+        .toList()
+    val recentAlert = openAlerts.firstOrNull { !isGenericName(it.ecosystem) }
+    val recentNearbyAlert = openAlerts.firstOrNull { isGenericName(it.ecosystem) }
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
@@ -199,7 +239,12 @@ fun MainScreen(
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             item { Spacer(Modifier.height(4.dp)) }
-            item { StatusHero(running, alerting, suspicious, scanFault, locationFault, recentAlert, now) }
+            item {
+                StatusHero(
+                    running, alerting, suspicious, scanFault, locationFault, recentAlert,
+                    nearbyAlerting, recentNearbyAlert, nearbyEnabled, now
+                )
+            }
             item {
                 Button(
                     onClick = onStartStop,
@@ -230,7 +275,7 @@ fun MainScreen(
 
             item {
                 SectionHeader(
-                    if (active.isEmpty()) "Nothing nearby" else "Active (${active.size})"
+                    if (active.isEmpty()) "Trackers nearby" else "Trackers nearby (${active.size})"
                 )
             }
             if (active.isEmpty()) {
@@ -247,14 +292,78 @@ fun MainScreen(
                 }
             } else {
                 items(active, key = { it.stableId }) { t ->
-                    TrackerCard(t, now, onClick = { detail = t }, onApprove = onApprove, onDistrust = onDistrust)
+                    TrackerCard(t, now, false, onClick = { detail = t }, onApprove = onApprove, onDistrust = onDistrust)
+                }
+            }
+
+            item {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(Modifier.weight(1f)) {
+                        SectionHeader(
+                            if (nearbyEnabled && nearby.isNotEmpty()) "Other devices nearby (${nearby.size})"
+                            else "Other Bluetooth devices"
+                        )
+                    }
+                    Switch(checked = nearbyEnabled, onCheckedChange = onSetNearby)
+                }
+            }
+            if (!nearbyEnabled) {
+                item {
+                    Text(
+                        "Off. VIGIL is watching for known tracker types only.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            } else {
+                if (sweepFault != null && running) {
+                    item { Text(sweepFault, style = MaterialTheme.typography.bodySmall, color = VigilPeach) }
+                }
+                if (nearby.isEmpty()) {
+                    item {
+                        Text(
+                            when {
+                                !running -> "Not scanning."
+                                scanFault != null -> "Not listening right now — see above."
+                                lastSweepAt == 0L -> "First check in a few seconds…"
+                                else -> "No other devices heard in the last 10 minutes."
+                            },
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                } else {
+                    val shown = if (showAllNearby) nearby else nearby.take(NEARBY_COLLAPSED)
+                    items(shown, key = { it.stableId }) { t ->
+                        TrackerCard(
+                            t, now, t.lastMac in pairedAddresses,
+                            onClick = { detail = t }, onApprove = onApprove, onDistrust = onDistrust
+                        )
+                    }
+                    if (nearby.size > NEARBY_COLLAPSED) {
+                        item {
+                            TextButton(onClick = { showAllNearby = !showAllNearby }) {
+                                Text(if (showAllNearby) "Show fewer" else "Show all ${nearby.size}")
+                            }
+                        }
+                    }
+                }
+                item {
+                    Text(
+                        nearbyFooter(running, lastSweepAt, now),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
             }
 
             if (trusted.isNotEmpty()) {
                 item { SectionHeader("Trusted (${trusted.size})") }
                 items(trusted, key = { it.stableId }) { t ->
-                    TrackerCard(t, now, onClick = { detail = t }, onApprove = onApprove, onDistrust = onDistrust)
+                    TrackerCard(
+                        t, now, isGeneric(t) && t.lastMac in pairedAddresses,
+                        onClick = { detail = t }, onApprove = onApprove, onDistrust = onDistrust
+                    )
                 }
             }
 
@@ -269,7 +378,11 @@ fun MainScreen(
         }
     }
 
-    detail?.let { t ->
+    // Show the live row, not the copy taken when the sheet opened: the numbers on
+    // an open sheet used to stay frozen while the device kept being heard. Falls
+    // back to the copy when the row has left the list.
+    detail?.let { opened ->
+        val t = trackers.firstOrNull { it.stableId == opened.stableId } ?: opened
         val sheetState = rememberModalBottomSheetState()
         ModalBottomSheet(
             onDismissRequest = { detail = null },
@@ -278,9 +391,10 @@ fun MainScreen(
         ) {
             TrackerDetail(
                 t,
+                paired = isGeneric(t) && t.lastMac in pairedAddresses,
                 onApprove = { id, a -> onApprove(id, a); detail = null },
                 onDistrust = { id -> onDistrust(id); detail = null },
-                onFind = { dev -> ScanService.setFinderTarget(dev.stableId); finding = dev; detail = null },
+                onFind = { dev -> finding = dev; detail = null },
                 onRing = onRing,
                 onSafety = { onOpenSafety(); detail = null },
                 loadTrail = loadTrail
@@ -292,7 +406,7 @@ fun MainScreen(
         FinderScreen(
             dev,
             onRing = onRing,
-            onClose = { ScanService.setFinderTarget(null); finding = null }
+            onClose = { finding = null }
         )
     }
 }
@@ -305,12 +419,19 @@ private fun StatusHero(
     scanFault: String?,
     locationFault: String?,
     recentAlert: AlertEntity?,
+    nearbyAlerting: Int,
+    recentNearbyAlert: AlertEntity?,
+    nearbyEnabled: Boolean,
     now: Long
 ) {
     data class Look(val title: String, val subtitle: String, val icon: ImageVector, val color: Color)
 
+    // A fresh alert stays the headline after watching stops. "Idle" used to replace
+    // it, so stopping VIGIL straight after an alert hid the alert from the card.
+    val alertShown = alerting > 0 || recentAlert != null || nearbyAlerting > 0 || recentNearbyAlert != null
     val look = when {
-        !running -> Look("Idle", "Tap Start Watching to begin.", Icons.Filled.Shield, MaterialTheme.colorScheme.surfaceVariant)
+        !running && !alertShown ->
+            Look("Idle", "Tap Start Watching to begin.", Icons.Filled.Shield, MaterialTheme.colorScheme.surfaceVariant)
         alerting > 0 -> Look(
             if (alerting == 1) "A tracker is following you" else "$alerting trackers following you",
             "Moving with you across places and time.", Icons.Filled.Warning, VigilRed
@@ -332,6 +453,25 @@ private fun StatusHero(
         locationFault != null -> Look(
             "Location needed", locationFault, Icons.Filled.LocationOff, VigilPeach
         )
+        // A device that is NOT a known tracker type. Worded and coloured so it can't
+        // be taken for a tracker alert. It names the innocent causes without saying
+        // how likely they are: nobody has measured that.
+        // "May be": the rule cannot tell carried from planted, nor a companion's
+        // device from either.
+        nearbyAlerting > 0 -> Look(
+            if (nearbyAlerting == 1) "A device may be moving with you"
+            else "$nearbyAlerting devices may be moving with you",
+            (if (nearbyAlerting == 1) "Not a known tracker type. It may be yours, a companion's, or part of a vehicle."
+            else "Not known tracker types. They may be yours, a companion's, or part of a vehicle.") +
+                (if (nearbyEnabled) " Check the list below."
+                else " Switch on Other Bluetooth devices below to see the list."),
+            Icons.Filled.GppMaybe, VigilPeach
+        )
+        recentNearbyAlert != null -> Look(
+            "Bluetooth device flagged",
+            "${recentNearbyAlert.label} was moving with you ${relative(recentNearbyAlert.timestamp, now)}. Not a known tracker type. See Alert history.",
+            Icons.Filled.GppMaybe, VigilPeach
+        )
         suspicious > 0 -> Look(
             "Keeping watch",
             "$suspicious possible follower(s) — not yet confirmed.", Icons.Filled.GppMaybe, VigilPeach
@@ -339,6 +479,14 @@ private fun StatusHero(
         // Says what VIGIL observed, not that nothing is there: rotation in the gap,
         // duty-cycled clones and tags that never report "separated" all stay quiet.
         else -> Look("All quiet", "No tracker seen moving with you.", Icons.Filled.CheckCircle, VigilGreen)
+    }
+
+    // A standing alert outranks a fault for the headline, but must not hide that
+    // VIGIL has stopped hearing anything since, or that it is not watching at all.
+    val faultNote = when {
+        !running && alertShown -> "Not watching right now. Tap Start Watching to keep checking."
+        running && scanFault != null && (alerting > 0 || recentAlert != null) -> "Not listening right now. $scanFault"
+        else -> null
     }
 
     Card(
@@ -365,6 +513,15 @@ private fun StatusHero(
                     color = Color(0xFF11111B)
                 )
                 Text(look.subtitle, style = MaterialTheme.typography.bodyMedium, color = Color(0xCC11111B))
+                faultNote?.let {
+                    Text(
+                        it,
+                        style = MaterialTheme.typography.bodySmall,
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFF11111B),
+                        modifier = Modifier.padding(top = 6.dp)
+                    )
+                }
             }
         }
     }
@@ -417,14 +574,19 @@ private fun SectionHeader(text: String) {
 private fun TrackerCard(
     t: TrackerEntity,
     now: Long,
+    paired: Boolean,
     onClick: () -> Unit,
     onApprove: (String, Boolean) -> Unit,
     onDistrust: (String) -> Unit
 ) {
     val status = statusOf(t)
-    val accent = statusColor(status)
+    val generic = isGeneric(t)
+    val accent = statusColor(status, generic)
+    // Other devices VIGIL has learned at the user's usual places sit in the nearby
+    // list; dim them so the ones nobody has accounted for stand out.
+    val dim = generic && status == TrackerStatus.SAFE_BASELINE
     Card(
-        Modifier.fillMaxWidth().clickable(onClick = onClick),
+        Modifier.fillMaxWidth().alpha(if (dim) 0.6f else 1f).clickable(onClick = onClick),
         shape = RoundedCornerShape(14.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
     ) {
@@ -437,12 +599,19 @@ private fun TrackerCard(
             }
             Spacer(Modifier.size(12.dp))
             Column(Modifier.weight(1f)) {
-                Text(ecosystemDisplay(t.ecosystem), fontWeight = FontWeight.SemiBold)
+                Text(displayName(t), fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text(
-                    "${statusLabel(status)} · ${t.distinctPlaces} ${if (t.distinctPlaces == 1) "place" else "places"} · ${t.lastRssi} dBm · ${relative(t.lastSeen, now)}",
+                    "${statusLabel(status, generic)} · ${t.distinctPlaces} ${if (t.distinctPlaces == 1) "place" else "places"} · ${t.lastRssi} dBm · ${relative(t.lastSeen, now)}",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
+                if (generic) {
+                    Text(
+                        nearbyHint(t, paired),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                    )
+                }
             }
             when (status) {
                 TrackerStatus.SAFE_APPROVED ->
@@ -458,6 +627,7 @@ private fun TrackerCard(
 @Composable
 private fun TrackerDetail(
     t: TrackerEntity,
+    paired: Boolean,
     onApprove: (String, Boolean) -> Unit,
     onDistrust: (String) -> Unit,
     onFind: (TrackerEntity) -> Unit,
@@ -466,20 +636,35 @@ private fun TrackerDetail(
     loadTrail: suspend (String) -> List<TrailPoint>
 ) {
     val status = statusOf(t)
-    Column(Modifier.fillMaxWidth().padding(24.dp)) {
+    val generic = isGeneric(t)
+    val kind = AddressKind.fromCode(t.addrKind)
+    // The sheet can be taller than the screen now that it carries more rows.
+    Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(24.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Icon(Icons.Filled.Bluetooth, null, tint = statusColor(status))
+            Icon(Icons.Filled.Bluetooth, null, tint = statusColor(status, generic))
             Spacer(Modifier.size(10.dp))
-            Text(ecosystemDisplay(t.ecosystem), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+            Text(displayName(t), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
         }
         Spacer(Modifier.height(4.dp))
-        Text(statusLabel(status), color = statusColor(status), fontWeight = FontWeight.SemiBold)
-        if (status == TrackerStatus.ALERTING || status == TrackerStatus.SUSPICIOUS) {
+        Text(statusLabel(status, generic), color = statusColor(status, generic), fontWeight = FontWeight.SemiBold)
+        if (generic) {
+            Text(
+                "Bluetooth device · not a known tracker type",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+        // For a device that is not a known tracker, "Watching" is the everyday state
+        // of the user's own things, so the safety button waits for a real flag.
+        if (status == TrackerStatus.ALERTING || (status == TrackerStatus.SUSPICIOUS && !generic)) {
             Spacer(Modifier.height(14.dp))
             Button(
                 onClick = onSafety,
                 modifier = Modifier.fillMaxWidth(),
-                colors = ButtonDefaults.buttonColors(containerColor = VigilRed, contentColor = Color(0xFF11111B))
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = if (generic) VigilPeach else VigilRed,
+                    contentColor = Color(0xFF11111B)
+                )
             ) {
                 Icon(Icons.Filled.HealthAndSafety, null, modifier = Modifier.size(18.dp))
                 Spacer(Modifier.size(8.dp))
@@ -497,16 +682,33 @@ private fun TrackerDetail(
         if (t.anchorDayCount > 0) {
             DetailRow("Days at your places", "${t.anchorDayCount} / 3 to trust")
         }
-        DetailRow("Identity", t.stableId.take(22) + "…")
+        if (generic) {
+            if (t.vendor.isNotEmpty()) DetailRow("Maker (as broadcast)", t.vendor)
+            DetailRow("Address", t.lastMac)
+            DetailRow("Address type", addressKindLabel(kind))
+            if (paired) DetailRow("Paired with this phone", "Yes")
+        } else {
+            DetailRow("Identity", t.stableId.take(22) + "…")
+        }
 
         Spacer(Modifier.height(16.dp))
         Text(
-            explanation(status),
+            explanation(status, generic),
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
+        if (generic) {
+            Spacer(Modifier.height(10.dp))
+            Text(
+                genericCaveat(kind),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
 
-        val trail by produceState(initialValue = emptyList<TrailPoint>(), t.stableId) { value = loadTrail(t.stableId) }
+        // Reloaded when it reaches a new place, so an open sheet's trail keeps up.
+        var trail by remember(t.stableId) { mutableStateOf(emptyList<TrailPoint>()) }
+        LaunchedEffect(t.stableId, t.distinctPlaces) { trail = loadTrail(t.stableId) }
         if (trail.size >= 2) {
             Spacer(Modifier.height(18.dp))
             Text("Where it was seen", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
@@ -531,16 +733,21 @@ private fun TrackerDetail(
                 Spacer(Modifier.size(6.dp))
                 Text("Find it")
             }
-            FilledTonalButton(onClick = { onRing(t) }, modifier = Modifier.weight(1f)) {
-                Icon(Icons.Filled.NotificationsActive, null, modifier = Modifier.size(18.dp))
-                Spacer(Modifier.size(6.dp))
-                Text("Ring it")
+            // Ringing means connecting, which VIGIL only does to known tracker types.
+            if (!generic) {
+                FilledTonalButton(onClick = { onRing(t) }, modifier = Modifier.weight(1f)) {
+                    Icon(Icons.Filled.NotificationsActive, null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.size(6.dp))
+                    Text("Ring it")
+                }
             }
         }
         var showInfo by remember { mutableStateOf(false) }
-        Spacer(Modifier.height(8.dp))
-        OutlinedButton(onClick = { showInfo = true }, modifier = Modifier.fillMaxWidth()) {
-            Text("Who owns it?")
+        if (!generic) {
+            Spacer(Modifier.height(8.dp))
+            OutlinedButton(onClick = { showInfo = true }, modifier = Modifier.fillMaxWidth()) {
+                Text("Who owns it?")
+            }
         }
         if (showInfo) {
             AlertDialog(
@@ -562,7 +769,7 @@ private fun TrackerDetail(
                 }
             TrackerStatus.SAFE_BASELINE ->
                 Button(onClick = { onDistrust(t.stableId) }, modifier = Modifier.fillMaxWidth()) {
-                    Text("Not mine — re-check this tracker")
+                    Text(if (generic) "Not mine — re-check this device" else "Not mine — re-check this tracker")
                 }
             else ->
                 Button(onClick = { onApprove(t.stableId, true) }, modifier = Modifier.fillMaxWidth()) {
@@ -587,6 +794,26 @@ private fun DetailRow(label: String, value: String) {
 private fun FinderScreen(t: TrackerEntity, onRing: (TrackerEntity) -> Unit, onClose: () -> Unit) {
     // Intercept system back so it closes the finder instead of exiting the app.
     BackHandler(onBack = onClose)
+    // The finder listens only while it is on screen. For a non-tracker device that
+    // listen hears everything at full rate, so it must not outlive the screen:
+    // set from the button and cleared from Close, it kept running after the screen
+    // went away any other way (rotated, closed from the recents list) until
+    // watching stopped. Tied to this screen's lifecycle it cannot.
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(t.stableId, lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_START -> ScanService.setFinderTarget(t.stableId)
+                Lifecycle.Event.ON_STOP -> ScanService.setFinderTarget(null)
+                else -> Unit
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+            ScanService.setFinderTarget(null)
+        }
+    }
     val rssi by ScanService.finderRssi.collectAsState()
     val heardAt by ScanService.finderHeardAt.collectAsState()
     val smoothed = remember { mutableStateOf(-100f) }
@@ -620,7 +847,7 @@ private fun FinderScreen(t: TrackerEntity, onRing: (TrackerEntity) -> Unit, onCl
             verticalArrangement = Arrangement.Center
         ) {
             Text(
-                ecosystemDisplay(t.ecosystem),
+                displayName(t),
                 style = MaterialTheme.typography.titleLarge,
                 fontWeight = FontWeight.Bold
             )
@@ -653,16 +880,20 @@ private fun FinderScreen(t: TrackerEntity, onRing: (TrackerEntity) -> Unit, onCl
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
             Spacer(Modifier.height(40.dp))
-            Button(onClick = { onRing(t) }, modifier = Modifier.fillMaxWidth().height(52.dp)) {
-                Icon(Icons.Filled.NotificationsActive, null)
-                Spacer(Modifier.size(8.dp))
-                Text("Make it ring")
+            val generic = isGeneric(t)
+            if (!generic) {
+                Button(onClick = { onRing(t) }, modifier = Modifier.fillMaxWidth().height(52.dp)) {
+                    Icon(Icons.Filled.NotificationsActive, null)
+                    Spacer(Modifier.size(8.dp))
+                    Text("Make it ring")
+                }
+                Spacer(Modifier.height(8.dp))
             }
-            Spacer(Modifier.height(8.dp))
             TextButton(onClick = onClose, modifier = Modifier.fillMaxWidth()) { Text("Done") }
             Spacer(Modifier.height(12.dp))
             Text(
-                "If it won't ring, it may be a silent or modified tracker — use the signal above to home in on it.",
+                if (generic) "VIGIL only listens to this device and never connects to it. The signal stops if it changes its address or VIGIL stops watching."
+                else "If it won't ring, it may be a silent or modified tracker — use the signal above to home in on it.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -709,7 +940,55 @@ private const val ACTIVE_WINDOW_MS = 10 * 60_000L  // trackers not seen this rec
 private const val RECENT_ALERT_MS = CoMovementEvaluator.ALERT_COOLDOWN_MS
 private const val FINDER_SILENCE_MS = 10_000L       // finder reading counts as lost after this
 
+// How many other devices the list shows before "Show all".
+private const val NEARBY_COLLAPSED = 6
+
 private fun isTrusted(t: TrackerEntity) = t.approved || t.baselineSafe
+
+private fun isGenericName(ecosystem: String) = ecosystem == TrackerEcosystem.OTHER_BLE.name
+
+/** True for "any other Bluetooth device", false for a known tracker type. */
+private fun isGeneric(t: TrackerEntity) = isGenericName(t.ecosystem)
+
+/** Card and sheet title: the tracker type, or for other devices what they broadcast. */
+private fun displayName(t: TrackerEntity): String =
+    if (isGeneric(t)) t.label.ifEmpty { TrackerEcosystem.OTHER_BLE.display } else ecosystemDisplay(t.ecosystem)
+
+/** Second line of an other-device card: what tells this one from the next. */
+private fun nearbyHint(t: TrackerEntity, paired: Boolean): String = buildList {
+    if (t.name.isNotEmpty() && t.vendor.isNotEmpty()) add(t.vendor)
+    add("…" + t.lastMac.takeLast(5))
+    if (paired) add("paired with this phone")
+    if (AddressKind.fromCode(t.addrKind).rotates) add("address changes")
+}.joinToString(" · ")
+
+private fun nearbyFooter(running: Boolean, lastSweepAt: Long, now: Long): String {
+    val checked = if (running && lastSweepAt > 0L) " Last check ${relative(lastSweepAt, now)}." else ""
+    return "Headphones, watches, beacons, and trackers VIGIL has no profile for. Bluetooth Low Energy only, " +
+        "checked in a ${ScanService.SWEEP_MS / 1000}-second burst about every ${ScanService.SWEEP_PERIOD_MS / 60_000} " +
+        "minutes, less often while the phone sleeps.$checked A device can only be followed while it keeps the same " +
+        "address. Phones and watches change theirs regularly (the Bluetooth standard suggests every 15 minutes), " +
+        "and some earbuds and other accessories do too."
+}
+
+private fun addressKindLabel(kind: AddressKind): String = when (kind) {
+    AddressKind.PUBLIC -> "Fixed (public)"
+    AddressKind.STATIC -> "Static (can change when it restarts)"
+    AddressKind.RESOLVABLE -> "Private (changes regularly)"
+    AddressKind.NON_RESOLVABLE -> "Private (changes)"
+    AddressKind.UNKNOWN -> "Not reported before Android 15"
+}
+
+/** What a user must know before reading anything into an other-device row. */
+private fun genericCaveat(kind: AddressKind): String {
+    val address = when {
+        kind.rotates -> "This device changes its Bluetooth address, so VIGIL can only follow it until the next change and will then list it as a new device."
+        kind == AddressKind.UNKNOWN -> "If this device changes its Bluetooth address (phones and watches do regularly, and so do some earbuds and other accessories), it shows up as a new device and VIGIL can't follow it across the change."
+        kind == AddressKind.STATIC -> "This device uses an address that normally stays the same until it restarts, so VIGIL can follow it."
+        else -> "This device uses a fixed address, so VIGIL can follow it."
+    }
+    return "$address The name, maker and address are whatever the device broadcasts; one built to hide can change all three."
+}
 
 private fun riskRank(t: TrackerEntity): Int = when (statusOf(t)) {
     TrackerStatus.ALERTING -> 3
@@ -728,9 +1007,11 @@ private fun statusOf(t: TrackerEntity): TrackerStatus = when {
     }
 }
 
-private fun statusColor(s: TrackerStatus): Color = when (s) {
-    TrackerStatus.ALERTING -> VigilRed
-    TrackerStatus.SUSPICIOUS -> VigilPeach
+// Other devices never use the tracker-alert red, and "Watching" (the everyday state
+// of the user's own headphones) is not a warning colour for them.
+private fun statusColor(s: TrackerStatus, generic: Boolean = false): Color = when (s) {
+    TrackerStatus.ALERTING -> if (generic) VigilPeach else VigilRed
+    TrackerStatus.SUSPICIOUS -> if (generic) Color(0xFF89B4FA) else VigilPeach
     TrackerStatus.SAFE_APPROVED, TrackerStatus.SAFE_BASELINE -> VigilGreen
     TrackerStatus.OBSERVED -> Color(0xFF89B4FA)
 }
@@ -742,15 +1023,26 @@ private fun statusIcon(s: TrackerStatus): ImageVector = when (s) {
     TrackerStatus.OBSERVED -> Icons.Filled.Bluetooth
 }
 
-private fun statusLabel(s: TrackerStatus): String = when (s) {
+private fun statusLabel(s: TrackerStatus, generic: Boolean = false): String = when (s) {
     TrackerStatus.SAFE_APPROVED -> "Approved (yours)"
     TrackerStatus.SAFE_BASELINE -> "Known (usual places)"
-    TrackerStatus.ALERTING -> "Following you"
+    TrackerStatus.ALERTING -> if (generic) "Moving with you" else "Following you"
     TrackerStatus.SUSPICIOUS -> "Watching"
     TrackerStatus.OBSERVED -> "Seen nearby"
 }
 
-private fun explanation(s: TrackerStatus): String = when (s) {
+private fun explanation(s: TrackerStatus, generic: Boolean): String =
+    if (generic) genericExplanation(s) else trackerExplanation(s)
+
+private fun genericExplanation(s: TrackerStatus): String = when (s) {
+    TrackerStatus.ALERTING -> "This device has been heard close to you at several separate places over a sustained time: the pattern of something travelling with you. VIGIL does not recognise it as a tracker. It may be something of yours, something carried by a person travelling with you, or part of a vehicle you ride in. If you can't account for it, treat it as a possible tracker."
+    TrackerStatus.SUSPICIOUS -> "Heard close to you at more than one place, but not across enough places and time to say it is travelling with you. Your own devices sit here until you mark them. VIGIL keeps watching."
+    TrackerStatus.OBSERVED -> "Heard nearby. Nothing so far suggests it is moving with you."
+    TrackerStatus.SAFE_APPROVED -> "You marked this as yours, so VIGIL won't alert on this address. If the device changes its address it will appear as new."
+    TrackerStatus.SAFE_BASELINE -> "Heard on 3+ days at places where you spend a lot of time, without moving with you — learned on-device."
+}
+
+private fun trackerExplanation(s: TrackerStatus): String = when (s) {
     TrackerStatus.ALERTING -> "This tracker has been heard near you at several distinct places over a sustained window — the pattern of something travelling with you. If it isn't yours, treat it seriously."
     TrackerStatus.SUSPICIOUS -> "Heard near you repeatedly, but not yet across enough places and time to say it's following you. VIGIL keeps watching."
     TrackerStatus.OBSERVED -> "Heard nearby, but not moving with you while away from its owner — most likely ambient."
@@ -766,4 +1058,6 @@ private fun ecosystemDisplay(name: String): String =
  *  inputs never changed, so Compose skipped them on every tick. Clamped so a sighting
  *  newer than the last tick reads as now, not as the future. */
 private fun relative(ts: Long, now: Long = System.currentTimeMillis()): String =
-    DateUtils.getRelativeTimeSpanString(ts, maxOf(ts, now), DateUtils.MINUTE_IN_MILLIS).toString()
+    // DateUtils words anything under a minute as "0 minutes ago".
+    if (now - ts < DateUtils.MINUTE_IN_MILLIS) "just now"
+    else DateUtils.getRelativeTimeSpanString(ts, now, DateUtils.MINUTE_IN_MILLIS).toString()

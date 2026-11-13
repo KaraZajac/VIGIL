@@ -1,19 +1,7 @@
 package org.soulstone.vigil.scan
 
-import android.Manifest
-import android.annotation.SuppressLint
-import android.bluetooth.BluetoothAdapter
-import android.bluetooth.BluetoothManager
-import android.bluetooth.le.BluetoothLeScanner
-import android.bluetooth.le.ScanCallback
 import android.bluetooth.le.ScanFilter
-import android.bluetooth.le.ScanResult
-import android.bluetooth.le.ScanSettings
 import android.content.Context
-import android.content.pm.PackageManager
-import android.os.Build
-import android.util.Log
-import androidx.core.content.ContextCompat
 import org.soulstone.vigil.model.TrackerObservation
 
 /**
@@ -22,36 +10,30 @@ import org.soulstone.vigil.model.TrackerObservation
  * only on a match, which is what makes screen-off/background scanning deliverable
  * and battery-tolerable (research brief §5).
  *
+ * What the filters do not buy is permanence. From Android 14 on, a filtered scan
+ * that has run for a few minutes (five on the Android 14 emulator image, ten on
+ * the Android 16 one) is moved to low power, where the radio listens a tenth of
+ * the time; Android 16's source halves that again once the screen is off. Nothing
+ * reports the demotion to the app. So the service calls [restart] every four
+ * minutes for as long as it is watching, which keeps the scan at full rate. The
+ * demotion was seen in the emulators' logs; how much it loses, and what avoiding
+ * it costs in battery, can only be measured on a phone and has not been.
+ *
  * Each match is parsed by [TrackerParser]; anything that parses is handed to
  * [onObservation]. All correlation/temporal logic lives downstream.
  */
 class BleTrackerScanner(
-    private val context: Context,
+    context: Context,
     private val onObservation: (TrackerObservation) -> Unit,
     /**
-     * Called when the controller kills the scan (see [ScanCallback.onScanFailed]).
+     * Called when the controller kills the scan (see ScanCallback.onScanFailed).
      * This MUST reach the service: a dead scan used to be recorded only in this
-     * object's private [running] flag, so the service kept reporting that it was
+     * object's private running flag, so the service kept reporting that it was
      * watching and the UI kept telling the user they were clear while nothing was
      * being listened for.
      */
-    private val onFailure: (Int) -> Unit = {}
+    onFailure: (Int) -> Unit = {}
 ) {
-    companion object {
-        private const val TAG = "BleTrackerScanner"
-    }
-
-    private val adapter: BluetoothAdapter? by lazy {
-        (context.getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager)?.adapter
-    }
-    private var leScanner: BluetoothLeScanner? = null
-    private var running = false
-
-    private val settings: ScanSettings = ScanSettings.Builder()
-        .setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY)
-        .setCallbackType(ScanSettings.CALLBACK_TYPE_ALL_MATCHES)
-        .build()
-
     private val filters: List<ScanFilter> = buildList {
         // Apple Find My — match ONLY the offline-finding message type (0x12), not
         // every Apple device (iPhones/Watches/AirPods all advertise company 0x004C).
@@ -72,79 +54,25 @@ class BleTrackerScanner(
         }
     }
 
+    private val client = LeScanClient(
+        context, "BleTrackerScanner", filters,
+        onResult = { r -> TrackerParser.parse(r)?.let(onObservation) },
+        onFailure = onFailure
+    )
+
     /** True only while the controller is actually delivering results to us. */
-    val isScanning: Boolean get() = running
+    val isScanning: Boolean get() = client.isScanning
+
+    /** elapsedRealtime of the last (re)start, 0 when idle — drives the periodic restart. */
+    val startedAtElapsed: Long get() = client.startedAtElapsed
 
     /** Why [start] would fail right now, or null if it should succeed. */
-    fun unavailableReason(): String? {
-        if (!hasScanPermission()) return "Bluetooth scan permission is not granted"
-        val a = adapter ?: return "This device has no Bluetooth adapter"
-        if (!a.isEnabled) return "Bluetooth is turned off"
-        return null
-    }
+    fun unavailableReason(): String? = client.unavailableReason()
 
-    fun hasScanPermission(): Boolean =
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            ContextCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_SCAN) ==
-                PackageManager.PERMISSION_GRANTED
-        } else {
-            ContextCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH) ==
-                PackageManager.PERMISSION_GRANTED &&
-                ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) ==
-                    PackageManager.PERMISSION_GRANTED
-        }
+    fun start(): Boolean = client.start()
 
-    @SuppressLint("MissingPermission")
-    fun start(): Boolean {
-        if (running) return true
-        if (!hasScanPermission()) {
-            Log.w(TAG, "BLE scan permission missing")
-            return false
-        }
-        val a = adapter ?: return false
-        if (!a.isEnabled) {
-            Log.w(TAG, "Bluetooth disabled")
-            return false
-        }
-        leScanner = a.bluetoothLeScanner ?: return false
-        return try {
-            leScanner?.startScan(filters, settings, callback)
-            running = true
-            Log.i(TAG, "Tracker scan started (${filters.size} filters)")
-            true
-        } catch (e: SecurityException) {
-            Log.e(TAG, "SecurityException starting scan", e)
-            false
-        }
-    }
+    fun stop() = client.stop()
 
-    @SuppressLint("MissingPermission")
-    fun stop() {
-        if (!running) return
-        try {
-            leScanner?.stopScan(callback)
-        } catch (e: Exception) {
-            // Broadened deliberately: this is now called from the Bluetooth-state
-            // receiver, and the adapter is typically already off by then, which makes
-            // stopScan throw IllegalStateException. Teardown must not crash the app.
-            Log.w(TAG, "stopScan failed (adapter likely already off): ${e.message}")
-        }
-        running = false
-    }
-
-    private val callback = object : ScanCallback() {
-        override fun onScanResult(callbackType: Int, result: ScanResult) {
-            TrackerParser.parse(result)?.let(onObservation)
-        }
-
-        override fun onBatchScanResults(results: MutableList<ScanResult>) {
-            results.forEach { r -> TrackerParser.parse(r)?.let(onObservation) }
-        }
-
-        override fun onScanFailed(errorCode: Int) {
-            Log.e(TAG, "BLE scan failed: $errorCode")
-            running = false
-            onFailure(errorCode)
-        }
-    }
+    /** Re-register the scan so Android's long-running-scan timeout never demotes it. */
+    fun restart(): Boolean = client.restart()
 }

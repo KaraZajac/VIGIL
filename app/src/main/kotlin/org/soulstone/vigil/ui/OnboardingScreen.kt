@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Bluetooth
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Sensors
@@ -53,6 +54,11 @@ fun OnboardingScreen(onFinish: () -> Unit) {
                 Icons.Filled.Sensors,
                 "Finds what follows you",
                 "Looks for AirTags, Tiles, Samsung SmartTags, and Apple and Google Find My tags that travel with you over time — not just whatever happens to be nearby."
+            )
+            Point(
+                Icons.Filled.Bluetooth,
+                "Watches other devices too",
+                "Also lists other Bluetooth devices heard near you, like headphones, watches and beacons, and flags one that stays close across several places, in case it is a tracker VIGIL has no profile for. Mark your own as yours. Devices that keep changing their address, as phones and most earbuds do, can't be followed."
             )
             Point(
                 Icons.Filled.Lock,

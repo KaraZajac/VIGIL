@@ -34,6 +34,18 @@ class Settings private constructor(context: Context) : ApprovedStore {
     }
 
     /**
+     * Whether to also list and follow Bluetooth devices that are not a known
+     * tracker format. On by default; the switch exists because it costs battery
+     * and fills the list in busy places.
+     */
+    private val _nearbyDevices = MutableStateFlow(prefs.getBoolean(KEY_NEARBY, true))
+    val nearbyDevices: StateFlow<Boolean> = _nearbyDevices.asStateFlow()
+    fun setNearbyDevices(value: Boolean) {
+        prefs.edit().putBoolean(KEY_NEARBY, value).apply()
+        _nearbyDevices.value = value
+    }
+
+    /**
      * The allowlist, kept here rather than only in Room because the database falls
      * back to destructive migration — a schema bump would otherwise silently
      * un-approve the user's own trackers and start alerting on them again.
@@ -53,6 +65,7 @@ class Settings private constructor(context: Context) : ApprovedStore {
         private const val KEY_SENSITIVITY = "sensitivity"
         private const val KEY_ONBOARDED = "onboarded"
         private const val KEY_APPROVED = "approved_ids"
+        private const val KEY_NEARBY = "nearby_devices"
 
         @Volatile private var INSTANCE: Settings? = null
         fun get(context: Context): Settings = INSTANCE ?: synchronized(this) {
